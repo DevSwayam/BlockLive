@@ -2,15 +2,14 @@
 
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
-import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
-import "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import { ERC1155 } from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import { AccessControlEnumerable } from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import { ERC2981 } from "@openzeppelin/contracts/token/common/ERC2981.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { Utils } from "./Utils.sol";
-import "operator-filter-registry/src/DefaultOperatorFilterer.sol";
+import { DefaultOperatorFilterer } from "operator-filter-registry/src/DefaultOperatorFilterer.sol";
+import { IEncryptedERC20 } from "./IEncryptedERC20.sol";
+import "fhevm/lib/TFHE.sol";
+import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
+import { EventHelperLibrary } from "./EventHelperLibrary.sol";
 
 /**
  * @title EventTicketManager
@@ -20,14 +19,12 @@ import "operator-filter-registry/src/DefaultOperatorFilterer.sol";
  * @custom:coauthor aronvis (Blocklive)
  */
 
-contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOperatorFilterer {
+contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilterer {
     function supportsInterface(
         bytes4 interfaceId
     ) public view virtual override(ERC1155, AccessControlEnumerable, ERC2981) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
-
-    using ECDSA for bytes32;
 
     enum DiscountType {
         Merkle,
@@ -36,16 +33,15 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
 
     struct TokenPrice {
         bool exists;
-        // @encrypt can be added here
-        uint256 value;
+        uint32 value;
     }
 
     /// @dev Register a discount with either a merkle root or signature
     /// @dev DiscountBase contains the non-nested data used to describe the code for updates
     struct DiscountBase {
-        string key; // Key for discount
-        string tokenType; // Token type key to apply discount to
-        uint256 value; // Basis points off token price
+        bytes32 key; // Key for discount
+        bytes32 tokenType; // Token type key to apply discount to
+        uint32 value; // Basis points off token price
         int256 maxUsesPerAddress; // Uses for the code per users (-1 inf)
         int256 maxUsesTotal; // Uses for the code for all users (-1 inf)
         DiscountType discountType; // Merkle or Signature based discount
@@ -62,7 +58,7 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     /// @dev Each type of token to be sold (ex: vip, premium)
     /// @dev TokenTypeBase contains the non-nested data used to describe the token type for updates
     struct TokenTypeBase {
-        string key; // Name of token type
+        bytes32 key; // Name of token type
         string displayName; // Name of token type
         int256 maxSupply; // Max number of token of this type (-1 inf)
         bool active; // Token type can be purchased
@@ -82,17 +78,15 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
         TokenTypeBase base;
         // @encryption can be added here
         uint256 purchased; // Number of tokens purchased of this type
-        mapping(string => Discount) discount; // Mapping of discount key to Discount
-        // @encrypt
-        mapping(string => TokenPrice) price; // Mapping of currency key to price
+        mapping(bytes32 => Discount) discount; // Mapping of discount key to Discount
+        mapping(bytes32 => TokenPrice) price; // Mapping of currency key to price
     }
 
     /// @dev Each type of currency accepted for token purchases
     struct CurrencyBase {
-        string tokenType; // Unique key for the token type
-        // @encrypt
-        uint256 price; // Price for the token type
-        string currency; // Unique key for the erc20 token used for purchase
+        bytes32 tokenType; // Unique key for the token type
+        uint32 price; // Price for the token type
+        bytes32 currency; // Unique key for the erc20 token used for purchase
         address currencyAddress; // Contract address for the erc20 token used for purchase
     }
 
@@ -100,14 +94,14 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     struct Split {
         bool exists;
         address withdrawer;
-        uint256 percent;
-        uint256 base;
+        uint32 percent;
+        uint32 base;
     }
 
     /// @dev Each token sold
     struct Token {
         bool exists;
-        string tokenType; // Map to key of token type
+        bytes32 tokenType; // Map to key of token type
         address owner; // Address of token owner
         bool locked; // Token is soulbound and cannot be transferred
         bool valid; // Token is valid for event entry
@@ -118,10 +112,10 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
 
     /// Contract version
-    string public version = "0.7.0";
+    bytes32 public constant version = "0.7.0";
 
     /// Public name shown for collection title on marketplaces
-    string public name;
+    bytes32 public name;
 
     /// Base URI for metadata reference
     string private _uriBase;
@@ -139,25 +133,51 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     mapping(uint256 => Token) private _tokenRegistry;
 
     /// Mapping of token key to token type
-    mapping(string => TokenType) private _tokenTypeRegistry;
+    mapping(bytes32 => TokenType) private _tokenTypeRegistry;
 
     Split[] public splitRegistry;
 
     /// Mapping from currency name to its ERC20 address
-    mapping(string => IERC20) public tokenCurrencies;
+    // @encrypted-erc20 change need to be added here IEncryptedErc20 will come
+    mapping(bytes32 => IEncryptedERC20) public tokenCurrencies;
 
     // All currency keys for iteration
-    string[] private currencyKeys;
+    bytes32[] private currencyKeys;
 
     /// Latest token id
     uint256 public tokenIdCounter;
 
-    event TokenPurchased(uint256 indexed tokenId, string indexed tokenType);
+    event TokenPurchased(uint256 indexed tokenId, bytes32 indexed tokenType);
+
+    // Custom Errors
+    error Event__AccessDenied();
+    error Event__EventIsNotActive();
+    error Event__ArgumentsLengthMismatched();
+    error Event__NotEnoughBalanceForBatch();
+    error Event__MaxSupplyForTokenType();
+    error Event__MaxSupplyForContract();
+    error Event__ExceedsLimit();
+    error Event__CurrencyIsNotRegistered();
+    error Event__TokenTypeIsNotRegistered();
+    error Event__TokenTypeIsGated();
+    error Event__NotOnAllowedSignatureList();
+    error Event__NotOnMerkleAllowList();
+    error Event__InvalidDiscountType();
+    error Event__MaxTotalUsesReached();
+    error Event__MaxTotalUsersUsesReached();
+    error Event__DiscountExceedsPrize();
+    error Event__OnlyOwner();
+    error Event__SplitsMustBeSame();
+    error Event__SplitMustAddUpToThousandPercentage();
+    error Event__NotEnoughBalance();
+    error Event__TokenIsLocked();
+    error Event__TokenTypeIsLocked();
+    error Event__EventIsAlreadyStarted();
 
     constructor(
         address creator,
         string memory uribase,
-        string memory nameContract,
+        bytes32 nameContract,
         TokenTypeBase[] memory tokenTypeBase,
         CurrencyBase[] memory currencyBase,
         DiscountBase[] memory discountBase,
@@ -177,6 +197,7 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
         splitRegistry.push(Split(true, creator, 1, 1));
 
         /// @notice Initialize royalties for ERC2981
+        // 1000 => 10%
         _setDefaultRoyalty(creator, 1000);
 
         /// @notice Initialize token types, currencies, discounts, splits
@@ -184,65 +205,65 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     }
 
     function setURIBase(string memory newuribase) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         _uriBase = newuribase;
     }
 
     function setURI(string memory newuri) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         _setURI(newuri);
     }
 
     function setDefaultRoyalty(address _receiver, uint96 _feeNumerator) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         _setDefaultRoyalty(_receiver, _feeNumerator);
     }
 
     function uri(uint256 _id) public view override returns (string memory) {
-        return string.concat(_uriBase, "/", toAsciiString(address(this)), "/", Strings.toString(_id));
+        return
+            string.concat(_uriBase, "/", EventHelperLibrary.toAsciiString(address(this)), "/", Strings.toString(_id));
     }
 
-    function isNative(string memory currency) private pure returns (bool) {
+    function isNative(bytes32 currency) private pure returns (bool) {
         return keccak256(abi.encodePacked(currency)) == keccak256(abi.encodePacked("native"));
     }
 
     function buyToken(
-        string memory _tokenType,
-        uint256 amount,
+        bytes32 _tokenType,
+        uint32 amount,
         address receiver,
-        string memory currency
+        bytes32 currency
     ) public payable {
         buyToken(_tokenType, amount, receiver, currency, address(0), "", new bytes32[](0), "");
     }
 
     /// @notice Purchase multiple tokens in a single txn
     function buyToken(
-        string[] memory _tokenType,
-        uint256[] memory amount,
+        bytes32[] memory _tokenType,
+        uint32[] memory amount,
         address[] memory receiver,
-        string[] memory currency,
+        bytes32[] memory currency,
         address[] memory payer,
-        string[] memory discountCode,
+        bytes32[] memory discountCode,
         bytes32[][] memory merkleProof,
         bytes[] memory signature
-    ) public payable {
-        require(active, "Not active");
-
-        require(
-            _tokenType.length == amount.length &&
+    ) public payable onlyWhenActive {
+        if (
+            !(_tokenType.length == amount.length &&
                 _tokenType.length == receiver.length &&
                 _tokenType.length == currency.length &&
                 _tokenType.length == payer.length &&
                 _tokenType.length == discountCode.length &&
                 _tokenType.length == merkleProof.length &&
-                _tokenType.length == signature.length,
-            "Arg length mismatch"
-        );
+                _tokenType.length == signature.length)
+        ) {
+            revert Event__ArgumentsLengthMismatched();
+        }
 
         uint256 purchaseTotal = 0;
 
         for (uint256 i = 0; i < _tokenType.length; i++) {
-            uint256 price = buyToken(
+            uint32 price = buyToken(
                 _tokenType[i],
                 amount[i],
                 receiver[i],
@@ -257,78 +278,110 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
             }
         }
 
-        require(hasRole(OWNER_ROLE, msg.sender) || msg.value >= purchaseTotal, "Not enough bal for batch");
+        if (!(hasRole(OWNER_ROLE, msg.sender) || msg.value >= purchaseTotal)) {
+            revert Event__NotEnoughBalanceForBatch();
+        }
     }
 
     /// @notice Purchase a token
     function buyToken(
-        string memory _tokenType, // Unique key for  type to be priced against
-        uint256 amount, // Amount to purchase multiple copies of a single token ID
+        bytes32 _tokenType, // Unique key for  type to be priced against
+        uint32 amount, // Amount to purchase multiple copies of a single token ID
         address receiver, // Address to receive the token
-        string memory currency, // Currency to be used for purchase
+        bytes32 currency, // Currency to be used for purchase
         address payer, // Address to pay for the token when ERC20
-        string memory discountCode, // Discount code to be applied
+        bytes32 discountCode, // Discount code to be applied
         bytes32[] memory merkleProof, // Merkle proof for discount
         bytes memory signature // Signature for discount
-    ) public payable returns (uint256) {
+    ) public payable onlyWhenActive returns (uint32) {
         address payerAddress = payer != address(0) ? payer : msg.sender;
 
-        require(active, "Not active");
-
         int256 maxSupply = _tokenTypeRegistry[_tokenType].base.maxSupply;
-        require(
-            maxSupply < 0 || _tokenTypeRegistry[_tokenType].purchased + amount <= uint256(maxSupply),
-            "Max supply for token type"
-        );
-
-        require(totalMaxSupply < 0 || tokenIdCounter + amount <= uint256(totalMaxSupply), "Max supply for contract");
-
-        require(amount < orderLimit, "Exceeds limit");
-
-        require(_tokenTypeRegistry[_tokenType].base.active, "Token type is not active");
-
-        require(isNative(currency) || address(tokenCurrencies[currency]) != address(0), "Curr not registered");
-
-        require(_tokenTypeRegistry[_tokenType].price[currency].exists, "Type not registered");
+        if (!(maxSupply < 0 || _tokenTypeRegistry[_tokenType].purchased + amount <= uint256(maxSupply))) {
+            revert Event__MaxSupplyForTokenType();
+        }
+        if (!(totalMaxSupply < 0 || tokenIdCounter + amount <= uint256(totalMaxSupply))) {
+            revert Event__MaxSupplyForContract();
+        }
+        if (!(amount < orderLimit)) {
+            revert Event__ExceedsLimit();
+        }
+        if (!(_tokenTypeRegistry[_tokenType].base.active)) {
+            revert Event__EventIsNotActive();
+        }
+        if (!(isNative(currency) || address(tokenCurrencies[currency]) != address(0))) {
+            revert Event__CurrencyIsNotRegistered();
+        }
+        if (!(_tokenTypeRegistry[_tokenType].price[currency].exists)) {
+            revert Event__TokenTypeIsNotRegistered();
+        }
 
         TokenPrice memory price = _tokenTypeRegistry[_tokenType].price[currency];
         Discount storage discount = _tokenTypeRegistry[_tokenType].discount[discountCode];
 
         if (_tokenTypeRegistry[_tokenType].base.gated && !discount.exists && !hasRole(OWNER_ROLE, msg.sender)) {
-            revert("Token type is gated");
+            revert Event__TokenTypeIsGated();
         }
 
         if (discount.exists) {
             if (discount.base.discountType == DiscountType.Signature) {
-                require(_verifySignature(receiver, signature, discount.base.signer), "Not on signature allow list");
+                if (!(EventHelperLibrary._verifySignature(receiver, signature, discount.base.signer))) {
+                    revert Event__NotOnAllowedSignatureList();
+                }
             } else if (discount.base.discountType == DiscountType.Merkle) {
-                require(_verifyAddress(merkleProof, discount.base.merkleRoot, receiver), "Not on merkle allow list");
+                if (!(EventHelperLibrary._verifyAddress(merkleProof, discount.base.merkleRoot, receiver))) {
+                    revert Event__NotOnMerkleAllowList();
+                }
             } else {
-                revert("Invalid discount type");
+                revert Event__InvalidDiscountType();
             }
 
-            price.value = price.value - ((price.value * discount.base.value) / 10000);
+            uint32 discountValue = (price.value * discount.base.value) / 10000;
+
+            // Ensure the discounted price does not underflow
+            if (!(discountValue <= price.value)) {
+                revert Event__DiscountExceedsPrize();
+            }
+
+            // Update the price.value with the new discounted price
+            price.value = price.value - discountValue;
 
             int256 maxUsesTotal = discount.base.maxUsesTotal;
             int256 maxUsesPerAddress = discount.base.maxUsesPerAddress;
-            require(maxUsesTotal < 0 || discount.uses + amount <= uint256(maxUsesTotal), "Max uses total reached");
-            
-            require(
-                maxUsesPerAddress < 0 || discount.usesPerAddress[receiver] + amount <= uint256(maxUsesPerAddress),
-                "Max uses reached for address"
-            );
+            if (!(maxUsesTotal < 0 || discount.uses + amount <= uint256(maxUsesTotal))) {
+                revert Event__MaxTotalUsesReached();
+            }
+
+            if (!(maxUsesPerAddress < 0 || discount.usesPerAddress[receiver] + amount <= uint256(maxUsesPerAddress))) {
+                revert Event__MaxTotalUsersUsesReached();
+            }
 
             discount.uses += 1;
             discount.usesPerAddress[receiver] += 1;
         }
 
         if (isNative(currency)) {
-            require(hasRole(OWNER_ROLE, msg.sender) || msg.value >= price.value * amount, "Not enough bal");
+            if (!(hasRole(OWNER_ROLE, msg.sender) || msg.value >= price.value * amount)) {
+                revert Event__NotEnoughBalance();
+            }
         } else {
             if (!hasRole(OWNER_ROLE, msg.sender)) {
-                require(tokenCurrencies[currency].balanceOf(payerAddress) >= price.value * amount, "Not enough bal");
+                // requiredTokenAmountToBePaid = then convert the price.value * amount into euint
+                euint32 _ticketPrice = TFHE.asEuint32(price.value * amount);
 
-                tokenCurrencies[currency].transferFrom(payerAddress, address(this), price.value * amount);
+                // Balance Check
+                euint32 _payerBalance = tokenCurrencies[currency].returnEncryptedBalanceOfUser(payerAddress);
+                TFHE.optReq(TFHE.le(_ticketPrice, _payerBalance));
+
+                // Allowance Check
+                euint32 _payerAllowance = tokenCurrencies[currency].returnEncryptedAllowanceOfUser(
+                    payerAddress,
+                    address(this)
+                );
+                TFHE.optReq(TFHE.le(_ticketPrice, _payerAllowance));
+
+                // Also give approval to this contract to pull funds on behalf of user
+                tokenCurrencies[currency].transferFrom(payerAddress, address(this), _ticketPrice);
             }
         }
 
@@ -348,7 +401,7 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     /// @notice Register token types
     /// @param tokenTypeBase Array of token type base structs
     function registerTokenType(TokenTypeBase[] memory tokenTypeBase) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         for (uint256 i = 0; i < tokenTypeBase.length; i++) {
             TokenType storage _tokenType = _tokenTypeRegistry[tokenTypeBase[i].key];
             _tokenType.base = tokenTypeBase[i];
@@ -359,47 +412,29 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     /// @notice Register a currency to be accepted for a token type and price
     /// @param currencyBase Array of currency base structs
     function registerCurrency(CurrencyBase[] memory currencyBase) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         for (uint256 i = 0; i < currencyBase.length; i++) {
             TokenType storage _tokenType = _tokenTypeRegistry[currencyBase[i].tokenType];
-            string memory ckey = currencyBase[i].currency;
+            bytes32 ckey = currencyBase[i].currency;
             address caddr = currencyBase[i].currencyAddress;
-            require(_tokenType.exists, "Token key not registered");
+            if (!(_tokenType.exists)) {
+                revert Event__TokenTypeIsNotRegistered();
+            }
 
             _tokenType.price[ckey] = TokenPrice(true, currencyBase[i].price);
 
-            if (caddr != address(0) && tokenCurrencies[ckey] != IERC20(caddr)) {
-                tokenCurrencies[ckey] = IERC20(caddr);
+            if (caddr != address(0) && tokenCurrencies[ckey] != IEncryptedERC20(caddr)) {
+                // @encrypted-erc20 change
+                tokenCurrencies[ckey] = IEncryptedERC20(caddr);
                 currencyKeys.push(ckey);
             }
         }
     }
 
-    function _verifyAddress(
-        bytes32[] memory merkleProof,
-        bytes32 merkleRoot,
-        address receiver
-    ) private pure returns (bool) {
-        bytes32 leafAddress = keccak256(abi.encodePacked(receiver));
-        return MerkleProof.verify(merkleProof, merkleRoot, leafAddress);
-    }
-
-    function _verifySignature(
-        address allowedAddress,
-        bytes memory signature,
-        address signer
-    ) internal pure returns (bool _isValid) {
-        bytes32 digest = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", keccak256(abi.encode(allowedAddress)))
-        );
-
-        return signer == digest.recover(signature);
-    }
-
     /// @notice Register a discount for an event
     /// @param discountBase Base input discount data
     function registerDiscount(DiscountBase[] memory discountBase) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         for (uint256 i = 0; i < discountBase.length; i++) {
             Discount storage discount = _tokenTypeRegistry[discountBase[i].tokenType].discount[discountBase[i].key];
             discount.base = discountBase[i];
@@ -408,51 +443,49 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     }
 
     function setRole(address user, bytes32 role) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         _grantRole(role, user);
     }
 
     function removeRole(address user, bytes32 role) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         _revokeRole(role, user);
     }
 
     function setActive(bool _active) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         active = _active;
     }
 
     function setLimit(uint256 limit) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
-
+        _onlyManagerOrOwner();
         orderLimit = limit;
     }
 
-    function setTotalMaxSupply(int256 _totalMaxSupply) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
-
+    function setTotalMaxSupply(int256 _totalMaxSupply) external {
+        _onlyManagerOrOwner();
         totalMaxSupply = _totalMaxSupply;
     }
 
     /// @notice Token Type Registry helpers
-    function tokenActive(string memory _tokenType) public view returns (bool) {
+    function tokenActive(bytes32 _tokenType) external view returns (bool) {
         return _tokenTypeRegistry[_tokenType].base.active;
     }
 
-    function tokenAmounts(string memory _tokenType) public view returns (int256) {
+    function tokenAmounts(bytes32 _tokenType) external view returns (int256) {
         return _tokenTypeRegistry[_tokenType].base.maxSupply;
     }
 
-    function tokensPurchased(string memory _tokenType) public view returns (uint256) {
+    function tokensPurchased(bytes32 _tokenType) external view returns (uint256) {
         return _tokenTypeRegistry[_tokenType].purchased;
     }
 
     /// @notice Token Registry helpers
-    function owned(uint256 tokenId) public view returns (address) {
+    function owned(uint256 tokenId) external view returns (address) {
         return _tokenRegistry[tokenId].owner;
     }
 
-    function tokenType(uint256 tokenId) public view returns (string memory) {
+    function tokenType(uint256 tokenId) external view returns (bytes32) {
         return _tokenRegistry[tokenId].tokenType;
     }
 
@@ -461,13 +494,13 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     }
 
     function setTokenLock(uint256 tokenId, bool locked) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         _tokenRegistry[tokenId].locked = locked;
     }
 
     /// @notice Register roles
-    function registerRoles(RoleBase[] memory roles) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+    function registerRoles(RoleBase[] memory roles) public  {
+        _onlyManagerOrOwner();
         for (uint256 i = 0; i < roles.length; i++) {
             _grantRole(roles[i].role, roles[i].userAddress);
         }
@@ -479,7 +512,7 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     }
 
     function registerSplits(Split[] memory splits) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         if (splits.length < 1) {
             return;
         }
@@ -492,12 +525,16 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
         for (uint256 i = 0; i < splits.length; i++) {
             total += splits[i].percent;
             splitRegistry.push(splits[i]);
-            require(splits[i].base == base, "Splits must have same base");
+            if (!(splits[i].base == base)) {
+                revert Event__SplitsMustBeSame();
+            }
         }
-        require(total / base == 1, "Splits must add up to 100%");
+        if (!(total / base == 1)) {
+            revert Event__SplitMustAddUpToThousandPercentage();
+        }
     }
 
-    function sweep(string memory currency, Split[] memory splits) internal {
+    function sweep(bytes32 currency, Split[] memory splits) internal {
         if (keccak256(abi.encodePacked(currency)) == keccak256(abi.encodePacked("native"))) {
             uint256 _balance = address(this).balance;
             for (uint i = 0; i < splits.length; i++) {
@@ -505,30 +542,33 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
                 payable(splits[i].withdrawer).transfer(splitBalance);
             }
         } else {
-            IERC20 token = tokenCurrencies[currency];
-            uint256 _balance = token.balanceOf(address(this));
+            IEncryptedERC20 token = tokenCurrencies[currency];
+            euint32 _balance = token.returnEncryptedBalanceOfUser(address(this));
+            uint32 _balanceOfContract = TFHE.decrypt(_balance);
             for (uint i = 0; i < splits.length; i++) {
-                uint256 splitBalance = (_balance * splits[i].percent) / splits[i].base;
+                euint32 splitBalance = TFHE.asEuint32((_balanceOfContract * splits[i].percent) / splits[i].base);
                 token.transfer(splits[i].withdrawer, splitBalance);
             }
         }
     }
 
-    function sweepSplit(string memory currency) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "No access");
+    function sweepSplit(bytes32 currency) public {
+        _onlyManagerOrOwner();
         sweep(currency, splitRegistry);
     }
 
     /// @notice Full sweep for the manager as backup if the split registry is corrupted
     function sweepAll(address sweeper) public {
-        require(hasRole(OWNER_ROLE, msg.sender), "Access Denied");
+        if (!(hasRole(OWNER_ROLE, msg.sender))) {
+            revert Event__OnlyOwner();
+        }
 
         Split[] memory splits = new Split[](1);
         splits[0] = Split(true, sweeper, 1, 1);
 
         // Sweep all erc20 tokens
         for (uint256 i = 0; i < currencyKeys.length; i++) {
-            string memory ckey = currencyKeys[i];
+            bytes32 ckey = currencyKeys[i];
             sweep(ckey, splits);
         }
 
@@ -545,8 +585,8 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
         DiscountBase[] memory discountBase,
         Split[] memory splits,
         RoleBase[] memory roles
-    ) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+    ) public  {
+        _onlyManagerOrOwner();
         registerTokenType(tokenTypeBase);
         registerCurrency(currencyBase);
         registerDiscount(discountBase);
@@ -554,30 +594,31 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
         registerRoles(roles);
     }
 
-    function rescueToken(address from, address to, uint256 id, uint256 amount, bytes memory data) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+    function rescueToken(
+        address from,
+        address to,
+        uint256 id,
+        uint256 amount,
+        bytes memory data
+    ) public {
+        _onlyManagerOrOwner();
         _safeTransferFrom(from, to, id, amount, data);
     }
 
     /// @notice Call for offchain updates to metadata json
     function metadataUpdated(uint256 tokenId) public {
-        require(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender), "Access Denied");
+        _onlyManagerOrOwner();
         emit URI(uri(tokenId), tokenId);
     }
 
-    function contractBalances() public view returns (uint256) {
-        uint256 balances = 0;
-        for (uint256 i = 0; i < currencyKeys.length; i++) {
-            balances += tokenCurrencies[currencyKeys[i]].balanceOf(address(this));
-        }
-        balances += address(this).balance;
-        return balances;
-    }
-
+    // Dev removed one function and also remove a require from below
     function renounceAccessControl() public {
-        require(hasRole(OWNER_ROLE, msg.sender), "Access Denied");
-        require(contractBalances() == 0, "Bal is not zero");
-
+        if (!(hasRole(OWNER_ROLE, msg.sender))) {
+            revert Event__OnlyOwner();
+        }
+        if (!(tokenIdCounter == 0)) {
+            revert Event__EventIsAlreadyStarted();
+        }
         bytes32[2] memory roles = [OWNER_ROLE, MANAGER_ROLE];
 
         for (uint256 r = 0; r < roles.length; r++) {
@@ -589,28 +630,27 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
 
     /// Overrides
     /// @notice Keep the list of owners up to date on all transfers, mints, burns
-    function _update(
-        address from,
-        address to,
-        uint256[] memory ids,
-        uint256[] memory values
-    ) internal virtual {
+    function _update(address from, address to, uint256[] memory ids, uint256[] memory values) internal virtual {
         // To run **after** the transfer
-         super._beforeTokenTransfer(msg.sender,from, to, ids,values,"");
+        super._beforeTokenTransfer(msg.sender, from, to, ids, values, "");
         for (uint256 i = 0; i < ids.length; ++i) {
             uint256 id = ids[i];
             _tokenRegistry[id].owner = to;
         }
-        super._afterTokenTransfer(msg.sender,from, to, ids,values,"");
+        super._afterTokenTransfer(msg.sender, from, to, ids, values, "");
     }
 
     /// Ensure token and token type are both unlocked
     function checkOnlyUnlocked(uint256 tokenId) public view {
         /// Check token is not locked
-        require(_tokenRegistry[tokenId].locked == false, "Token is locked");
+        if (!(_tokenRegistry[tokenId].locked == false)) {
+            revert Event__TokenIsLocked();
+        }
 
         /// Check token type is not locked
-        require(_tokenTypeRegistry[_tokenRegistry[tokenId].tokenType].base.locked == false, "Token type is locked");
+        if (!(_tokenTypeRegistry[_tokenRegistry[tokenId].tokenType].base.locked == false)) {
+            revert Event__TokenTypeIsLocked();
+        }
     }
 
     /// @notice modifier to block batch transfers when token is locked
@@ -626,6 +666,19 @@ contract Event is ERC1155, ERC2981, Utils, AccessControlEnumerable, DefaultOpera
     modifier onlyUnlocked(uint256 tokenId) {
         /// Check all tokens, only allow if all are unlocked
         checkOnlyUnlocked(tokenId);
+        _;
+    }
+    
+    function _onlyManagerOrOwner() private view{
+        if (!(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender))) {
+            revert Event__AccessDenied();
+        }
+    }
+
+    modifier onlyWhenActive() {
+        if (!active) {
+            revert Event__EventIsNotActive();
+        }
         _;
     }
 
