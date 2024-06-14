@@ -2,15 +2,15 @@
 
 pragma solidity ^0.8.20;
 
-import { ERC1155 } from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import { AccessControlEnumerable } from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
-import { ERC2981 } from "@openzeppelin/contracts/token/common/ERC2981.sol";
-import { DefaultOperatorFilterer } from "operator-filter-registry/src/DefaultOperatorFilterer.sol";
-import { IEncryptedERC20 } from "./IEncryptedERC20.sol";
+import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
+import {ERC2981} from "@openzeppelin/contracts/token/common/ERC2981.sol";
+import {DefaultOperatorFilterer} from "operator-filter-registry/src/DefaultOperatorFilterer.sol";
+import {IEncryptedERC20} from "./IEncryptedERC20.sol";
 import "fhevm/lib/TFHE.sol";
-import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
-import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 /**
  * @title EventTicketManager
@@ -20,12 +20,24 @@ import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerklePr
  * @custom:coauthor aronvis (Blocklive)
  */
 
-contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilterer {
+contract Event is
+    ERC1155,
+    ERC2981,
+    AccessControlEnumerable,
+    DefaultOperatorFilterer
+{
     function supportsInterface(
         bytes4 interfaceId
-    ) public view virtual override(ERC1155, AccessControlEnumerable, ERC2981) returns (bool) {
+    )
+        public
+        view
+        virtual
+        override(ERC1155, AccessControlEnumerable, ERC2981)
+        returns (bool)
+    {
         return super.supportsInterface(interfaceId);
     }
+
     using ECDSA for bytes32;
 
     enum DiscountType {
@@ -176,29 +188,29 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     error Event__TokenTypeIsLocked();
     error Event__EventIsAlreadyStarted();
 
-    constructor(address creator, string memory uribase, string memory nameContract) ERC1155(uribase) {
-        name = nameContract;
-        /// @notice Assign creator to be owner
-        _grantRole(OWNER_ROLE, creator);
-        _grantRole(MANAGER_ROLE, creator);
-        _uriBase = uribase;
-    }
-
-    function initialize(
+constructor(
+        address creator,
+        string memory uribase,
+        string memory nameContract,
         TokenTypeBase[] memory tokenTypeBase,
         CurrencyBase[] memory currencyBase,
         DiscountBase[] memory discountBase,
         Split[] memory splits,
         RoleBase[] memory roles
-    ) external {
-        _onlyManagerOrOwner();
+    ) ERC1155(uribase) {
+        name = nameContract;
+
+        /// @notice Assign creator to be owner
+        _grantRole(OWNER_ROLE, creator);
+        _grantRole(MANAGER_ROLE, creator);
+
+        _uriBase = uribase;
         active = true;
-        address creator = getRoleMember(OWNER_ROLE, 1);
+
         /// @notice Initialze default split registry with 100% to creator
         splitRegistry.push(Split(true, creator, 1, 1));
 
         /// @notice Initialize royalties for ERC2981
-        // 1000 => 10%
         _setDefaultRoyalty(creator, 1000);
 
         /// @notice Initialize token types, currencies, discounts, splits
@@ -222,11 +234,19 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
     function uri(uint256 _id) public view override returns (string memory) {
         return
-            string.concat(_uriBase, "/", toAsciiString(address(this)), "/", Strings.toString(_id));
+            string.concat(
+                _uriBase,
+                "/",
+                toAsciiString(address(this)),
+                "/",
+                Strings.toString(_id)
+            );
     }
 
     function isNative(string memory currency) private pure returns (bool) {
-        return keccak256(abi.encodePacked(currency)) == keccak256(abi.encodePacked("native"));
+        return
+            keccak256(abi.encodePacked(currency)) ==
+            keccak256(abi.encodePacked("native"));
     }
 
     function buyToken(
@@ -235,7 +255,16 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         address receiver,
         string memory currency
     ) public payable {
-        buyToken(_tokenType, amount, receiver, currency, address(0), "", new bytes32[](0), "");
+        buyToken(
+            _tokenType,
+            amount,
+            receiver,
+            currency,
+            address(0),
+            "",
+            new bytes32[](0),
+            ""
+        );
     }
 
     /// @notice Purchase multiple tokens in a single txn
@@ -298,10 +327,17 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         address payerAddress = payer != address(0) ? payer : msg.sender;
 
         int256 maxSupply = _tokenTypeRegistry[_tokenType].base.maxSupply;
-        if (!(maxSupply < 0 || _tokenTypeRegistry[_tokenType].purchased + amount <= uint256(maxSupply))) {
+        if (
+            !(maxSupply < 0 ||
+                _tokenTypeRegistry[_tokenType].purchased + amount <=
+                uint256(maxSupply))
+        ) {
             revert Event__MaxSupplyForTokenType();
         }
-        if (!(totalMaxSupply < 0 || tokenIdCounter + amount <= uint256(totalMaxSupply))) {
+        if (
+            !(totalMaxSupply < 0 ||
+                tokenIdCounter + amount <= uint256(totalMaxSupply))
+        ) {
             revert Event__MaxSupplyForContract();
         }
         if (!(amount < orderLimit)) {
@@ -310,27 +346,54 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         if (!(_tokenTypeRegistry[_tokenType].base.active)) {
             revert Event__EventIsNotActive();
         }
-        if (!(isNative(currency) || address(tokenCurrencies[currency]) != address(0))) {
+        if (
+            !(isNative(currency) ||
+                address(tokenCurrencies[currency]) != address(0))
+        ) {
             revert Event__CurrencyIsNotRegistered();
         }
         if (!(_tokenTypeRegistry[_tokenType].price[currency].exists)) {
             revert Event__TokenTypeIsNotRegistered();
         }
 
-        TokenPrice memory price = _tokenTypeRegistry[_tokenType].price[currency];
-        Discount storage discount = _tokenTypeRegistry[_tokenType].discount[discountCode];
+        TokenPrice memory price = _tokenTypeRegistry[_tokenType].price[
+            currency
+        ];
+        Discount storage discount = _tokenTypeRegistry[_tokenType].discount[
+            discountCode
+        ];
 
-        if (_tokenTypeRegistry[_tokenType].base.gated && !discount.exists && !hasRole(OWNER_ROLE, msg.sender)) {
+        if (
+            _tokenTypeRegistry[_tokenType].base.gated &&
+            !discount.exists &&
+            !hasRole(OWNER_ROLE, msg.sender)
+        ) {
             revert Event__TokenTypeIsGated();
         }
 
         if (discount.exists) {
             if (discount.base.discountType == DiscountType.Signature) {
-                if (!(_verifySignature(receiver, signature, discount.base.signer))) {
+                if (
+                    !(
+                        _verifySignature(
+                            receiver,
+                            signature,
+                            discount.base.signer
+                        )
+                    )
+                ) {
                     revert Event__NotOnAllowedSignatureList();
                 }
             } else if (discount.base.discountType == DiscountType.Merkle) {
-                if (!(_verifyAddress(merkleProof, discount.base.merkleRoot, receiver))) {
+                if (
+                    !(
+                        _verifyAddress(
+                            merkleProof,
+                            discount.base.merkleRoot,
+                            receiver
+                        )
+                    )
+                ) {
                     revert Event__NotOnMerkleAllowList();
                 }
             } else {
@@ -349,11 +412,18 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
             int256 maxUsesTotal = discount.base.maxUsesTotal;
             int256 maxUsesPerAddress = discount.base.maxUsesPerAddress;
-            if (!(maxUsesTotal < 0 || discount.uses + amount <= uint256(maxUsesTotal))) {
+            if (
+                !(maxUsesTotal < 0 ||
+                    discount.uses + amount <= uint256(maxUsesTotal))
+            ) {
                 revert Event__MaxTotalUsesReached();
             }
 
-            if (!(maxUsesPerAddress < 0 || discount.usesPerAddress[receiver] + amount <= uint256(maxUsesPerAddress))) {
+            if (
+                !(maxUsesPerAddress < 0 ||
+                    discount.usesPerAddress[receiver] + amount <=
+                    uint256(maxUsesPerAddress))
+            ) {
                 revert Event__MaxTotalUsersUsesReached();
             }
 
@@ -362,7 +432,10 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         }
 
         if (isNative(currency)) {
-            if (!(hasRole(OWNER_ROLE, msg.sender) || msg.value >= price.value * amount)) {
+            if (
+                !(hasRole(OWNER_ROLE, msg.sender) ||
+                    msg.value >= price.value * amount)
+            ) {
                 revert Event__NotEnoughBalance();
             }
         } else {
@@ -371,18 +444,24 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
                 euint32 _ticketPrice = TFHE.asEuint32(price.value * amount);
 
                 // Balance Check
-                euint32 _payerBalance = tokenCurrencies[currency].returnEncryptedBalanceOfUser(payerAddress);
+                euint32 _payerBalance = tokenCurrencies[currency]
+                    .returnEncryptedBalanceOfUser(payerAddress);
                 TFHE.optReq(TFHE.le(_ticketPrice, _payerBalance));
 
                 // Allowance Check
-                euint32 _payerAllowance = tokenCurrencies[currency].returnEncryptedAllowanceOfUser(
-                    payerAddress,
-                    address(this)
-                );
+                euint32 _payerAllowance = tokenCurrencies[currency]
+                    .returnEncryptedAllowanceOfUser(
+                        payerAddress,
+                        address(this)
+                    );
                 TFHE.optReq(TFHE.le(_ticketPrice, _payerAllowance));
 
                 // Also give approval to this contract to pull funds on behalf of user
-                tokenCurrencies[currency].transferFrom(payerAddress, address(this), _ticketPrice);
+                tokenCurrencies[currency].transferFrom(
+                    payerAddress,
+                    address(this),
+                    _ticketPrice
+                );
             }
         }
 
@@ -404,7 +483,9 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     function registerTokenType(TokenTypeBase[] memory tokenTypeBase) public {
         _onlyManagerOrOwner();
         for (uint256 i = 0; i < tokenTypeBase.length; i++) {
-            TokenType storage _tokenType = _tokenTypeRegistry[tokenTypeBase[i].key];
+            TokenType storage _tokenType = _tokenTypeRegistry[
+                tokenTypeBase[i].key
+            ];
             _tokenType.base = tokenTypeBase[i];
             _tokenType.exists = true;
         }
@@ -415,7 +496,9 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     function registerCurrency(CurrencyBase[] memory currencyBase) public {
         _onlyManagerOrOwner();
         for (uint256 i = 0; i < currencyBase.length; i++) {
-            TokenType storage _tokenType = _tokenTypeRegistry[currencyBase[i].tokenType];
+            TokenType storage _tokenType = _tokenTypeRegistry[
+                currencyBase[i].tokenType
+            ];
             string memory ckey = currencyBase[i].currency;
             address caddr = currencyBase[i].currencyAddress;
             if (!(_tokenType.exists)) {
@@ -424,7 +507,10 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
             _tokenType.price[ckey] = TokenPrice(true, currencyBase[i].price);
 
-            if (caddr != address(0) && tokenCurrencies[ckey] != IEncryptedERC20(caddr)) {
+            if (
+                caddr != address(0) &&
+                tokenCurrencies[ckey] != IEncryptedERC20(caddr)
+            ) {
                 // @encrypted-erc20 change
                 tokenCurrencies[ckey] = IEncryptedERC20(caddr);
                 currencyKeys.push(ckey);
@@ -437,7 +523,9 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     function registerDiscount(DiscountBase[] memory discountBase) public {
         _onlyManagerOrOwner();
         for (uint256 i = 0; i < discountBase.length; i++) {
-            Discount storage discount = _tokenTypeRegistry[discountBase[i].tokenType].discount[discountBase[i].key];
+            Discount storage discount = _tokenTypeRegistry[
+                discountBase[i].tokenType
+            ].discount[discountBase[i].key];
             discount.base = discountBase[i];
             discount.exists = true;
         }
@@ -469,15 +557,21 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     }
 
     /// @notice Token Type Registry helpers
-    function tokenActive(string memory _tokenType) external view returns (bool) {
+    function tokenActive(
+        string memory _tokenType
+    ) external view returns (bool) {
         return _tokenTypeRegistry[_tokenType].base.active;
     }
 
-    function tokenAmounts(string memory _tokenType) external view returns (int256) {
+    function tokenAmounts(
+        string memory _tokenType
+    ) external view returns (int256) {
         return _tokenTypeRegistry[_tokenType].base.maxSupply;
     }
 
-    function tokensPurchased(string memory _tokenType) external view returns (uint256) {
+    function tokensPurchased(
+        string memory _tokenType
+    ) external view returns (uint256) {
         return _tokenTypeRegistry[_tokenType].purchased;
     }
 
@@ -536,18 +630,26 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     }
 
     function sweep(string memory currency, Split[] memory splits) internal {
-        if (keccak256(abi.encodePacked(currency)) == keccak256(abi.encodePacked("native"))) {
+        if (
+            keccak256(abi.encodePacked(currency)) ==
+            keccak256(abi.encodePacked("native"))
+        ) {
             uint256 _balance = address(this).balance;
             for (uint i = 0; i < splits.length; i++) {
-                uint256 splitBalance = (_balance * splits[i].percent) / splits[i].base;
+                uint256 splitBalance = (_balance * splits[i].percent) /
+                    splits[i].base;
                 payable(splits[i].withdrawer).transfer(splitBalance);
             }
         } else {
             IEncryptedERC20 token = tokenCurrencies[currency];
-            euint32 _balance = token.returnEncryptedBalanceOfUser(address(this));
+            euint32 _balance = token.returnEncryptedBalanceOfUser(
+                address(this)
+            );
             uint32 _balanceOfContract = TFHE.decrypt(_balance);
             for (uint i = 0; i < splits.length; i++) {
-                euint32 splitBalance = TFHE.asEuint32((_balanceOfContract * splits[i].percent) / splits[i].base);
+                euint32 splitBalance = TFHE.asEuint32(
+                    (_balanceOfContract * splits[i].percent) / splits[i].base
+                );
                 token.transfer(splits[i].withdrawer, splitBalance);
             }
         }
@@ -595,7 +697,13 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         registerRoles(roles);
     }
 
-    function rescueToken(address from, address to, uint256 id, uint256 amount, bytes memory data) public {
+    function rescueToken(
+        address from,
+        address to,
+        uint256 id,
+        uint256 amount,
+        bytes memory data
+    ) public {
         _onlyManagerOrOwner();
         _safeTransferFrom(from, to, id, amount, data);
     }
@@ -623,7 +731,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         }
     }
 
-/// Overrides
+    /// Overrides
     /// @notice Keep the list of owners up to date on all transfers, mints, burns
     function _update(
         address from,
@@ -650,7 +758,11 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         }
 
         /// Check token type is not locked
-        if (!(_tokenTypeRegistry[_tokenRegistry[tokenId].tokenType].base.locked == false)) {
+        if (
+            !(_tokenTypeRegistry[_tokenRegistry[tokenId].tokenType]
+                .base
+                .locked == false)
+        ) {
             revert Event__TokenTypeIsLocked();
         }
     }
@@ -672,7 +784,10 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     }
 
     function _onlyManagerOrOwner() private view {
-        if (!(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender))) {
+        if (
+            !(hasRole(OWNER_ROLE, msg.sender) ||
+                hasRole(MANAGER_ROLE, msg.sender))
+        ) {
             revert Event__AccessDenied();
         }
     }
@@ -687,7 +802,10 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     /// @notice Filter registry from OpenSea.
     /// @dev See {IERC1155-setApprovalForAll}.
     /// @dev In this example the added modifier ensures that the operator is allowed by the OperatorFilterRegistry.
-    function setApprovalForAll(address operator, bool approved) public override onlyAllowedOperatorApproval(operator) {
+    function setApprovalForAll(
+        address operator,
+        bool approved
+    ) public override onlyAllowedOperatorApproval(operator) {
         super.setApprovalForAll(operator, approved);
     }
 
@@ -714,17 +832,22 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     ) public virtual override onlyAllowedOperator(from) onlyUnlockedBatch(ids) {
         super.safeBatchTransferFrom(from, to, ids, amounts, data);
     }
+
     function _verifySignature(
         address allowedAddress,
         bytes memory signature,
         address signer
     ) public pure returns (bool _isValid) {
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", keccak256(abi.encode(allowedAddress)))
+            abi.encodePacked(
+                "\x19Ethereum Signed Message:\n32",
+                keccak256(abi.encode(allowedAddress))
+            )
         );
 
         return signer == digest.recover(signature);
     }
+
     function _verifyAddress(
         bytes32[] memory merkleProof,
         bytes32 merkleRoot,
@@ -737,11 +860,11 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     function toAsciiString(address x) internal pure returns (string memory) {
         bytes memory s = new bytes(40);
         for (uint i = 0; i < 20; i++) {
-            bytes1 b = bytes1(uint8(uint(uint160(x)) / (2**(8*(19 - i)))));
+            bytes1 b = bytes1(uint8(uint(uint160(x)) / (2 ** (8 * (19 - i)))));
             bytes1 hi = bytes1(uint8(b) / 16);
             bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
-            s[2*i] = char(hi);
-            s[2*i+1] = char(lo);            
+            s[2 * i] = char(hi);
+            s[2 * i + 1] = char(lo);
         }
         return string(s);
     }

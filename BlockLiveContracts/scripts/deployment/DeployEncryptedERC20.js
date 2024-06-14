@@ -1,4 +1,4 @@
-const { ethers, network, run } = require("hardhat")
+const {ethers} = require("hardhat")
 
 async function deployEncryptedERC20() {
     const eventUriBase = "https://example.com/api/tickets";
