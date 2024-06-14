@@ -3,13 +3,14 @@
 pragma solidity ^0.8.20;
 
 import { ERC1155 } from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import { AccessControlEnumerable } from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
+import { AccessControlEnumerable } from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import { ERC2981 } from "@openzeppelin/contracts/token/common/ERC2981.sol";
 import { DefaultOperatorFilterer } from "operator-filter-registry/src/DefaultOperatorFilterer.sol";
 import { IEncryptedERC20 } from "./IEncryptedERC20.sol";
 import "fhevm/lib/TFHE.sol";
 import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
-import { EventHelperLibrary } from "./EventHelperLibrary.sol";
+import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 /**
  * @title EventTicketManager
@@ -25,6 +26,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     ) public view virtual override(ERC1155, AccessControlEnumerable, ERC2981) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
+    using ECDSA for bytes32;
 
     enum DiscountType {
         Merkle,
@@ -39,8 +41,8 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     /// @dev Register a discount with either a merkle root or signature
     /// @dev DiscountBase contains the non-nested data used to describe the code for updates
     struct DiscountBase {
-        bytes32 key; // Key for discount
-        bytes32 tokenType; // Token type key to apply discount to
+        string key; // Key for discount
+        string tokenType; // Token type key to apply discount to
         uint32 value; // Basis points off token price
         int256 maxUsesPerAddress; // Uses for the code per users (-1 inf)
         int256 maxUsesTotal; // Uses for the code for all users (-1 inf)
@@ -58,7 +60,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     /// @dev Each type of token to be sold (ex: vip, premium)
     /// @dev TokenTypeBase contains the non-nested data used to describe the token type for updates
     struct TokenTypeBase {
-        bytes32 key; // Name of token type
+        string key; // Name of token type
         string displayName; // Name of token type
         int256 maxSupply; // Max number of token of this type (-1 inf)
         bool active; // Token type can be purchased
@@ -78,15 +80,15 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         TokenTypeBase base;
         // @encryption can be added here
         uint256 purchased; // Number of tokens purchased of this type
-        mapping(bytes32 => Discount) discount; // Mapping of discount key to Discount
-        mapping(bytes32 => TokenPrice) price; // Mapping of currency key to price
+        mapping(string => Discount) discount; // Mapping of discount key to Discount
+        mapping(string => TokenPrice) price; // Mapping of currency key to price
     }
 
     /// @dev Each type of currency accepted for token purchases
     struct CurrencyBase {
-        bytes32 tokenType; // Unique key for the token type
+        string tokenType; // Unique key for the token type
         uint32 price; // Price for the token type
-        bytes32 currency; // Unique key for the erc20 token used for purchase
+        string currency; // Unique key for the erc20 token used for purchase
         address currencyAddress; // Contract address for the erc20 token used for purchase
     }
 
@@ -101,7 +103,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     /// @dev Each token sold
     struct Token {
         bool exists;
-        bytes32 tokenType; // Map to key of token type
+        string tokenType; // Map to key of token type
         address owner; // Address of token owner
         bool locked; // Token is soulbound and cannot be transferred
         bool valid; // Token is valid for event entry
@@ -115,7 +117,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     bytes32 public constant version = "0.7.0";
 
     /// Public name shown for collection title on marketplaces
-    bytes32 public name;
+    string public name;
 
     /// Base URI for metadata reference
     string private _uriBase;
@@ -133,21 +135,21 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     mapping(uint256 => Token) private _tokenRegistry;
 
     /// Mapping of token key to token type
-    mapping(bytes32 => TokenType) private _tokenTypeRegistry;
+    mapping(string => TokenType) private _tokenTypeRegistry;
 
     Split[] public splitRegistry;
 
     /// Mapping from currency name to its ERC20 address
     // @encrypted-erc20 change need to be added here IEncryptedErc20 will come
-    mapping(bytes32 => IEncryptedERC20) public tokenCurrencies;
+    mapping(string => IEncryptedERC20) public tokenCurrencies;
 
     // All currency keys for iteration
-    bytes32[] private currencyKeys;
+    string[] private currencyKeys;
 
     /// Latest token id
     uint256 public tokenIdCounter;
 
-    event TokenPurchased(uint256 indexed tokenId, bytes32 indexed tokenType);
+    event TokenPurchased(uint256 indexed tokenId, string indexed tokenType);
 
     // Custom Errors
     error Event__AccessDenied();
@@ -174,25 +176,24 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     error Event__TokenTypeIsLocked();
     error Event__EventIsAlreadyStarted();
 
-    constructor(
-        address creator,
-        string memory uribase,
-        bytes32 nameContract,
+    constructor(address creator, string memory uribase, string memory nameContract) ERC1155(uribase) {
+        name = nameContract;
+        /// @notice Assign creator to be owner
+        _grantRole(OWNER_ROLE, creator);
+        _grantRole(MANAGER_ROLE, creator);
+        _uriBase = uribase;
+    }
+
+    function initialize(
         TokenTypeBase[] memory tokenTypeBase,
         CurrencyBase[] memory currencyBase,
         DiscountBase[] memory discountBase,
         Split[] memory splits,
         RoleBase[] memory roles
-    ) ERC1155(uribase) {
-        name = nameContract;
-
-        /// @notice Assign creator to be owner
-        _grantRole(OWNER_ROLE, creator);
-        _grantRole(MANAGER_ROLE, creator);
-
-        _uriBase = uribase;
+    ) external {
+        _onlyManagerOrOwner();
         active = true;
-
+        address creator = getRoleMember(OWNER_ROLE, 1);
         /// @notice Initialze default split registry with 100% to creator
         splitRegistry.push(Split(true, creator, 1, 1));
 
@@ -221,30 +222,30 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
     function uri(uint256 _id) public view override returns (string memory) {
         return
-            string.concat(_uriBase, "/", EventHelperLibrary.toAsciiString(address(this)), "/", Strings.toString(_id));
+            string.concat(_uriBase, "/", toAsciiString(address(this)), "/", Strings.toString(_id));
     }
 
-    function isNative(bytes32 currency) private pure returns (bool) {
+    function isNative(string memory currency) private pure returns (bool) {
         return keccak256(abi.encodePacked(currency)) == keccak256(abi.encodePacked("native"));
     }
 
     function buyToken(
-        bytes32 _tokenType,
+        string memory _tokenType,
         uint32 amount,
         address receiver,
-        bytes32 currency
+        string memory currency
     ) public payable {
         buyToken(_tokenType, amount, receiver, currency, address(0), "", new bytes32[](0), "");
     }
 
     /// @notice Purchase multiple tokens in a single txn
     function buyToken(
-        bytes32[] memory _tokenType,
+        string[] memory _tokenType,
         uint32[] memory amount,
         address[] memory receiver,
-        bytes32[] memory currency,
+        string[] memory currency,
         address[] memory payer,
-        bytes32[] memory discountCode,
+        string[] memory discountCode,
         bytes32[][] memory merkleProof,
         bytes[] memory signature
     ) public payable onlyWhenActive {
@@ -285,12 +286,12 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
     /// @notice Purchase a token
     function buyToken(
-        bytes32 _tokenType, // Unique key for  type to be priced against
+        string memory _tokenType, // Unique key for  type to be priced against
         uint32 amount, // Amount to purchase multiple copies of a single token ID
         address receiver, // Address to receive the token
-        bytes32 currency, // Currency to be used for purchase
+        string memory currency, // Currency to be used for purchase
         address payer, // Address to pay for the token when ERC20
-        bytes32 discountCode, // Discount code to be applied
+        string memory discountCode, // Discount code to be applied
         bytes32[] memory merkleProof, // Merkle proof for discount
         bytes memory signature // Signature for discount
     ) public payable onlyWhenActive returns (uint32) {
@@ -325,11 +326,11 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
         if (discount.exists) {
             if (discount.base.discountType == DiscountType.Signature) {
-                if (!(EventHelperLibrary._verifySignature(receiver, signature, discount.base.signer))) {
+                if (!(_verifySignature(receiver, signature, discount.base.signer))) {
                     revert Event__NotOnAllowedSignatureList();
                 }
             } else if (discount.base.discountType == DiscountType.Merkle) {
-                if (!(EventHelperLibrary._verifyAddress(merkleProof, discount.base.merkleRoot, receiver))) {
+                if (!(_verifyAddress(merkleProof, discount.base.merkleRoot, receiver))) {
                     revert Event__NotOnMerkleAllowList();
                 }
             } else {
@@ -415,7 +416,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         _onlyManagerOrOwner();
         for (uint256 i = 0; i < currencyBase.length; i++) {
             TokenType storage _tokenType = _tokenTypeRegistry[currencyBase[i].tokenType];
-            bytes32 ckey = currencyBase[i].currency;
+            string memory ckey = currencyBase[i].currency;
             address caddr = currencyBase[i].currencyAddress;
             if (!(_tokenType.exists)) {
                 revert Event__TokenTypeIsNotRegistered();
@@ -468,15 +469,15 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     }
 
     /// @notice Token Type Registry helpers
-    function tokenActive(bytes32 _tokenType) external view returns (bool) {
+    function tokenActive(string memory _tokenType) external view returns (bool) {
         return _tokenTypeRegistry[_tokenType].base.active;
     }
 
-    function tokenAmounts(bytes32 _tokenType) external view returns (int256) {
+    function tokenAmounts(string memory _tokenType) external view returns (int256) {
         return _tokenTypeRegistry[_tokenType].base.maxSupply;
     }
 
-    function tokensPurchased(bytes32 _tokenType) external view returns (uint256) {
+    function tokensPurchased(string memory _tokenType) external view returns (uint256) {
         return _tokenTypeRegistry[_tokenType].purchased;
     }
 
@@ -485,7 +486,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         return _tokenRegistry[tokenId].owner;
     }
 
-    function tokenType(uint256 tokenId) external view returns (bytes32) {
+    function tokenType(uint256 tokenId) external view returns (string memory) {
         return _tokenRegistry[tokenId].tokenType;
     }
 
@@ -499,7 +500,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
     }
 
     /// @notice Register roles
-    function registerRoles(RoleBase[] memory roles) public  {
+    function registerRoles(RoleBase[] memory roles) public {
         _onlyManagerOrOwner();
         for (uint256 i = 0; i < roles.length; i++) {
             _grantRole(roles[i].role, roles[i].userAddress);
@@ -534,7 +535,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         }
     }
 
-    function sweep(bytes32 currency, Split[] memory splits) internal {
+    function sweep(string memory currency, Split[] memory splits) internal {
         if (keccak256(abi.encodePacked(currency)) == keccak256(abi.encodePacked("native"))) {
             uint256 _balance = address(this).balance;
             for (uint i = 0; i < splits.length; i++) {
@@ -552,7 +553,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         }
     }
 
-    function sweepSplit(bytes32 currency) public {
+    function sweepSplit(string memory currency) public {
         _onlyManagerOrOwner();
         sweep(currency, splitRegistry);
     }
@@ -568,7 +569,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
 
         // Sweep all erc20 tokens
         for (uint256 i = 0; i < currencyKeys.length; i++) {
-            bytes32 ckey = currencyKeys[i];
+            string memory ckey = currencyKeys[i];
             sweep(ckey, splits);
         }
 
@@ -585,7 +586,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         DiscountBase[] memory discountBase,
         Split[] memory splits,
         RoleBase[] memory roles
-    ) public  {
+    ) public {
         _onlyManagerOrOwner();
         registerTokenType(tokenTypeBase);
         registerCurrency(currencyBase);
@@ -594,13 +595,7 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         registerRoles(roles);
     }
 
-    function rescueToken(
-        address from,
-        address to,
-        uint256 id,
-        uint256 amount,
-        bytes memory data
-    ) public {
+    function rescueToken(address from, address to, uint256 id, uint256 amount, bytes memory data) public {
         _onlyManagerOrOwner();
         _safeTransferFrom(from, to, id, amount, data);
     }
@@ -628,16 +623,23 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         }
     }
 
-    /// Overrides
+/// Overrides
     /// @notice Keep the list of owners up to date on all transfers, mints, burns
-    function _update(address from, address to, uint256[] memory ids, uint256[] memory values) internal virtual {
+    function _update(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory values
+    ) internal virtual override {
+        // To run **before** the transfer
+
+        super._update(from, to, ids, values);
+
         // To run **after** the transfer
-        super._beforeTokenTransfer(msg.sender, from, to, ids, values, "");
         for (uint256 i = 0; i < ids.length; ++i) {
             uint256 id = ids[i];
             _tokenRegistry[id].owner = to;
         }
-        super._afterTokenTransfer(msg.sender, from, to, ids, values, "");
     }
 
     /// Ensure token and token type are both unlocked
@@ -668,8 +670,8 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         checkOnlyUnlocked(tokenId);
         _;
     }
-    
-    function _onlyManagerOrOwner() private view{
+
+    function _onlyManagerOrOwner() private view {
         if (!(hasRole(OWNER_ROLE, msg.sender) || hasRole(MANAGER_ROLE, msg.sender))) {
             revert Event__AccessDenied();
         }
@@ -711,5 +713,41 @@ contract Event is ERC1155, ERC2981, AccessControlEnumerable, DefaultOperatorFilt
         bytes memory data
     ) public virtual override onlyAllowedOperator(from) onlyUnlockedBatch(ids) {
         super.safeBatchTransferFrom(from, to, ids, amounts, data);
+    }
+    function _verifySignature(
+        address allowedAddress,
+        bytes memory signature,
+        address signer
+    ) public pure returns (bool _isValid) {
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", keccak256(abi.encode(allowedAddress)))
+        );
+
+        return signer == digest.recover(signature);
+    }
+    function _verifyAddress(
+        bytes32[] memory merkleProof,
+        bytes32 merkleRoot,
+        address receiver
+    ) public pure returns (bool) {
+        bytes32 leafAddress = keccak256(abi.encodePacked(receiver));
+        return MerkleProof.verify(merkleProof, merkleRoot, leafAddress);
+    }
+
+    function toAsciiString(address x) internal pure returns (string memory) {
+        bytes memory s = new bytes(40);
+        for (uint i = 0; i < 20; i++) {
+            bytes1 b = bytes1(uint8(uint(uint160(x)) / (2**(8*(19 - i)))));
+            bytes1 hi = bytes1(uint8(b) / 16);
+            bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
+            s[2*i] = char(hi);
+            s[2*i+1] = char(lo);            
+        }
+        return string(s);
+    }
+
+    function char(bytes1 b) internal pure returns (bytes1 c) {
+        if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
+        else return bytes1(uint8(b) + 0x57);
     }
 }
