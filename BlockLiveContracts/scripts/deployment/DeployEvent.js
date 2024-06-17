@@ -1,8 +1,8 @@
-const { ethers, network, run } = require("hardhat")
+const {ethers} = require("hardhat")
+const {eventData,priceData} = require("../sampleData/data_paidSingle");
+
 
 async function deployEvent() {
-    const eventUriBase = "https://example.com/api/tickets";
-    const eventName = "SampleEvent";
 
     const accounts = await ethers.getSigners();
     const deployer = accounts[0];
@@ -10,8 +10,9 @@ async function deployEvent() {
     let eventContract;
 
     const eventFactory = await ethers.getContractFactory("Event");
-    eventContract = await eventFactory.connect(deployer).deploy(deployer.address, eventUriBase, eventName, [], [], [], [], []);
-    return eventContract.address;
+    eventContract = await eventFactory.connect(deployer).deploy(deployer.address, eventData.uri, eventData.details._name, [], [], [], [], []);
+
+    return eventContract;
 
 }
 module.exports = {

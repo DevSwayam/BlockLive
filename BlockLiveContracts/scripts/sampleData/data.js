@@ -53,8 +53,8 @@ export const eventData = {
     _description:
       "All you can crytpo, free drinks with this NFT. Hang out with the ATX DAO.",
     _location: "Native Bar",
-    _start: 1662683400,
-    _end: 1662690600,
+    _start: 1720968389,
+    _end: 1721054789,
     _host: "ATX DAO",
     _thumbnail:
       "https://worldtop.mypinata.cloud/ipfs/QmbnfRbGnakbaBvXXQvpiLEydTQVvhuG6qALmWHsXnXBDW",
@@ -77,20 +77,8 @@ export const priceData = {
     },
     {
       tokenType: "premium",
-      price: BigNumber.from("2000000"), // USD 6 decimals (2 USD)
-      currency: "usdc",
-      currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "extra",
-      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-      currency: "native",
-      currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "extra",
-      price: BigNumber.from("2000000"), // USD 6 decimals (2 USD)
-      currency: "usdc",
+      price: BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
+      currency: "naitve",
       currencyAddress: AddressZero,
     },
     {
@@ -109,19 +97,15 @@ export const priceData = {
   tickets: ["free", "vip", "premium", "extra", "gated"],
   costs: [
     0,
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-    BigNumber.from("2000000"), // USD 6 decimals (2 USD)
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-    BigNumber.from("2000000"), // USD 6 decimals (2 USD),
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+    BigNumber.from("1000000000000000000"), 
+    BigNumber.from("1000000000000000000"),
+    BigNumber.from("1000000000000000000"),
+    BigNumber.from("1000000000000000000"),
   ],
   currencies: [
     "native",
     "native",
-    "usdc",
     "native",
-    "usdc",
     "native",
     "native",
   ],

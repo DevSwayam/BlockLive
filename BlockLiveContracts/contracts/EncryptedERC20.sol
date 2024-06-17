@@ -21,10 +21,17 @@ contract EncryptedERC20 is EIP712WithModifier {
     mapping(address => mapping(address => euint32)) private allowances;
 
     // The owner of the contract.
-    address public contractOwner;
+    address immutable public contractOwner;
 
-    constructor(address _owner) EIP712WithModifier("Authorization token", "1") {
-        contractOwner = _owner;
+    // The owner of the contract.
+    address public contractBalanceReader;
+
+    constructor() EIP712WithModifier("Authorization token", "1") {
+        contractOwner = msg.sender;
+    }
+
+    function setBalanceReader(address _readerAddress) external onlyContractOwner{
+        contractBalanceReader = _readerAddress;
     }
 
     // Sets the balance of the owner to the given encrypted balance.
@@ -116,16 +123,21 @@ contract EncryptedERC20 is EIP712WithModifier {
         balances[from] = balances[from] - amount;
     }
 
-    function returnEncryptedBalanceOfUser(address _userAddress) external view onlyContractOwner returns(euint32){
+    function returnEncryptedBalanceOfUser(address _userAddress) external view onlyContractReader returns(euint32){
         return balances[_userAddress];
     }
 
-    function returnEncryptedAllowanceOfUser(address _owner ,address _spender) external view onlyContractOwner returns(euint32){
+    function returnEncryptedAllowanceOfUser(address _owner ,address _spender) external view onlyContractReader returns(euint32){
         return allowances[_owner][_spender];
     }
 
     modifier onlyContractOwner() {
         require(msg.sender == contractOwner);
+        _;
+    }
+
+    modifier onlyContractReader() {
+        require(msg.sender == contractBalanceReader);
         _;
     }
 

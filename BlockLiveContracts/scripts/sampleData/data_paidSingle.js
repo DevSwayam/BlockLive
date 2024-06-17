@@ -1,8 +1,8 @@
 const { ethers } = require("hardhat");
-import { BigNumber } from "ethers";
+const { BigNumber } = require("ethers");
 const { AddressZero } = ethers.constants;
 
-export const eventData = {
+const eventData = {
   ticketBase: [
     {
       key: "premium",
@@ -29,18 +29,73 @@ export const eventData = {
   },
 };
 
-export const priceData = {
+const priceData = {
   priceBase: [
     {
+      tokenType: "free",
+      price: 0,
+      currency: "native",
+      currencyAddress: AddressZero,
+    },
+    {
+      tokenType: "vip",
+      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+      currency: "native",
+      currencyAddress: AddressZero,
+    },
+    {
       tokenType: "premium",
-      price: BigNumber.from("2000000"),
-      currency: "usdc",
+      price: BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
+      currency: "native",
+      currencyAddress: AddressZero,
+    },
+    {
+      tokenType: "extra",
+      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+      currency: "native",
+      currencyAddress: AddressZero,
+    },
+    {
+      tokenType: "extra",
+      price: BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
+      currency: "native",
+      currencyAddress: AddressZero,
+    },
+    {
+      tokenType: "extra",
+      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+      currency: "native",
+      currencyAddress: AddressZero,
+    },
+    {
+      tokenType: "gated",
+      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+      currency: "native",
       currencyAddress: AddressZero,
     },
   ],
-  tickets: ["premium"],
+  tickets: ["free", "vip", "premium", "extra", "gated"],
   costs: [
-    BigNumber.from("2000000"), // USD 6 decimals (2 USD)
+    0,
+    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+    BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
+    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+    BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD),
+    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
   ],
-  currencies: ["usdc"],
+  currencies: [
+    "native",
+    "native",
+    "usdc",
+    "native",
+    "usdc",
+    "native",
+    "native",
+  ],
 };
+
+module.exports = {
+  eventData,
+  priceData
+}
