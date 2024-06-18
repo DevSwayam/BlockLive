@@ -39,59 +39,19 @@ const priceData = {
     },
     {
       tokenType: "vip",
-      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+      price: 4000000000,
       currency: "native",
       currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "premium",
-      price: BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
-      currency: "native",
-      currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "extra",
-      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-      currency: "native",
-      currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "extra",
-      price: BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
-      currency: "native",
-      currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "extra",
-      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-      currency: "native",
-      currencyAddress: AddressZero,
-    },
-    {
-      tokenType: "gated",
-      price: BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-      currency: "native",
-      currencyAddress: AddressZero,
-    },
+    }
   ],
-  tickets: ["free", "vip", "premium", "extra", "gated"],
+  tickets: ["free","vip"],
   costs: [
     0,
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-    BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD)
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-    BigNumber.from("1000000000000000000"), // USD 6 decimals (2 USD),
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
-    BigNumber.from("1000000000000000000"), // ETH 18 decimals (1 ETH)
+    4000000000
   ],
   currencies: [
     "native",
-    "native",
-    "usdc",
-    "native",
-    "usdc",
-    "native",
-    "native",
+    "native"
   ],
 };
 

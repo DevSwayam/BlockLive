@@ -67,6 +67,7 @@ module.exports = {
             //     mnemonic: MNEMONIC,
             //   },
             chainId: 9090,
+            gas:999999
         }
     },
     defaultNetwork: "inco",
