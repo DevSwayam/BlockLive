@@ -5,16 +5,24 @@ const { AddressZero } = ethers.constants;
 const eventData = {
   ticketBase: [
     {
-      key: "premium",
-      displayName: "premium",
-      maxSupply: 2000,
+      key: "free",
+      displayName: "free",
+      maxSupply: 100,
       active: true,
       locked: false,
+      gated: false
+    },{
+      key: "vip",
+      displayName: "vip",
+      maxSupply: 100,
+      active: true,
+      locked: false,
+      gated: false
     },
   ],
-  ticketIds: ["premium"],
-  ticketNames: ["premium"],
-  amounts: [2000],
+  ticketIds: ["free","vip"],
+  ticketNames: ["free","vip"],
+  amounts: [100,100],
   uri: "https://blocklive.io/metadata/collection",
   details: {
     _name: "ATX DAO Native 8/8/22",

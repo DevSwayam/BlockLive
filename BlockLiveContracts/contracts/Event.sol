@@ -162,6 +162,7 @@ contract Event is
     uint256 public tokenIdCounter;
 
     event TokenPurchased(uint256 indexed tokenId, string indexed tokenType);
+    event currencyRegistered(address tokenAddress, uint32 price, string currencyKey, string tokenTypeKey);
 
     // Custom Errors
     error Event__AccessDenied();
@@ -251,7 +252,7 @@ constructor(
 
     function buyToken(
         string memory _tokenType,
-        uint32 amount,
+        uint256 amount,
         address receiver,
         string memory currency
     ) public payable {
@@ -270,25 +271,25 @@ constructor(
     /// @notice Purchase multiple tokens in a single txn
     function buyToken(
         string[] memory _tokenType,
-        uint32[] memory amount,
+        uint256[] memory amount,
         address[] memory receiver,
         string[] memory currency,
         address[] memory payer,
         string[] memory discountCode,
         bytes32[][] memory merkleProof,
         bytes[] memory signature
-    ) public payable onlyWhenActive {
-        if (
-            !(_tokenType.length == amount.length &&
+    ) public payable {
+        require(active, "Not active");
+        require(
+            _tokenType.length == amount.length &&
                 _tokenType.length == receiver.length &&
                 _tokenType.length == currency.length &&
                 _tokenType.length == payer.length &&
                 _tokenType.length == discountCode.length &&
                 _tokenType.length == merkleProof.length &&
-                _tokenType.length == signature.length)
-        ) {
-            revert Event__ArgumentsLengthMismatched();
-        }
+                _tokenType.length == signature.length,
+            "Arg length mismatch"
+        );
 
         uint256 purchaseTotal = 0;
 
@@ -308,53 +309,57 @@ constructor(
             }
         }
 
-        if (!(hasRole(OWNER_ROLE, msg.sender) || msg.value >= purchaseTotal)) {
-            revert Event__NotEnoughBalanceForBatch();
-        }
+        require(
+            hasRole(OWNER_ROLE, msg.sender) || msg.value >= purchaseTotal,
+            "Not enough bal for batch"
+        );
     }
 
     /// @notice Purchase a token
     function buyToken(
         string memory _tokenType, // Unique key for  type to be priced against
-        uint32 amount, // Amount to purchase multiple copies of a single token ID
+        uint256 amount, // Amount to purchase multiple copies of a single token ID
         address receiver, // Address to receive the token
         string memory currency, // Currency to be used for purchase
         address payer, // Address to pay for the token when ERC20
         string memory discountCode, // Discount code to be applied
         bytes32[] memory merkleProof, // Merkle proof for discount
         bytes memory signature // Signature for discount
-    ) public payable onlyWhenActive returns (uint32) {
+    ) public payable returns (uint32) {
         address payerAddress = payer != address(0) ? payer : msg.sender;
+                require(active, "Not active");
 
         int256 maxSupply = _tokenTypeRegistry[_tokenType].base.maxSupply;
-        if (
-            !(maxSupply < 0 ||
+        require(
+            maxSupply < 0 ||
                 _tokenTypeRegistry[_tokenType].purchased + amount <=
-                uint256(maxSupply))
-        ) {
-            revert Event__MaxSupplyForTokenType();
-        }
-        if (
-            !(totalMaxSupply < 0 ||
-                tokenIdCounter + amount <= uint256(totalMaxSupply))
-        ) {
-            revert Event__MaxSupplyForContract();
-        }
-        if (!(amount < orderLimit)) {
-            revert Event__ExceedsLimit();
-        }
-        if (!(_tokenTypeRegistry[_tokenType].base.active)) {
-            revert Event__EventIsNotActive();
-        }
-        if (
-            !(isNative(currency) ||
-                address(tokenCurrencies[currency]) != address(0))
-        ) {
-            revert Event__CurrencyIsNotRegistered();
-        }
-        if (!(_tokenTypeRegistry[_tokenType].price[currency].exists)) {
-            revert Event__TokenTypeIsNotRegistered();
-        }
+                uint256(maxSupply),
+            "Max supply for token type"
+        );
+
+        require(
+            totalMaxSupply < 0 ||
+                tokenIdCounter + amount <= uint256(totalMaxSupply),
+            "Max supply for contract"
+        );
+
+        require(amount < orderLimit, "Exceeds limit");
+
+        require(
+            _tokenTypeRegistry[_tokenType].base.active,
+            "Token type is not active"
+        );
+
+        require(
+            isNative(currency) ||
+                address(tokenCurrencies[currency]) != address(0),
+            "Curr not registered"
+        );
+
+        require(
+            _tokenTypeRegistry[_tokenType].price[currency].exists,
+            "Type not registered"
+        );
 
         TokenPrice memory price = _tokenTypeRegistry[_tokenType].price[
             currency
@@ -514,7 +519,9 @@ constructor(
                 // @encrypted-erc20 change
                 tokenCurrencies[ckey] = IEncryptedERC20(caddr);
                 currencyKeys.push(ckey);
+                emit currencyRegistered(caddr, currencyBase[i].price, currencyBase[i].currency,currencyBase[i].tokenType);
             }
+
         }
     }
 
