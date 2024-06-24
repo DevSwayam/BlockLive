@@ -43,8 +43,7 @@ describe("Unit Tests", function () {
         // ERC20 Contract tests for Mint and Approve
         const encryptedMintingAmount = instance.encrypt32(1000)
         const hexString = "0x" + toHexString(encryptedMintingAmount)
-        await erc20Contract.mintAndApprove(eventContract.address, hexString);
-
+        await erc20Contract.mintAndApprove(eventContract.address, hexString)
     })
 
     it("Should not allow us to buy when not active", async function () {
@@ -63,13 +62,61 @@ describe("Unit Tests", function () {
             await deploymentFixture()
         const encryptedMintingAmount = instance.encrypt32(eventData.ticketPrice)
         const hexString = "0x" + toHexString(encryptedMintingAmount)
-        const tx1 = await erc20Contract.mintAndApprove(eventContract.address, hexString);
+        const tx1 = await erc20Contract.mintAndApprove(eventContract.address, hexString)
         await tx1.wait()
         const transaction = await eventContract.buyToken(deployer.address, hexString, {
             gasLimit: 9000000,
         })
-        console.log("Transaction hash:", transaction.hash)
         await transaction.wait()
         expect((await eventContract.getTokenIdCounter()).toNumber()).to.equal(1)
+        expect(await eventContract.userToTokenId(deployer.address)).to.equal(0)
+        expect(await eventContract.tokenIdToUserAddress(0)).to.equal(deployer.address)
     })
+
+    it("Should set the right owner", async function () {
+        const { instance, erc20Contract, eventContract, deployer, tester } =
+            await deploymentFixture()
+
+        const OWNER_ROLE = await eventContract.OWNER_ROLE()
+        expect(await eventContract.hasRole(OWNER_ROLE, deployer.address)).to.equal(true)
+    })
+
+    it("Testing setActive Feature with buyToken Function", async function () {
+        const { instance, erc20Contract, eventContract, deployer, tester } =
+            await deploymentFixture()
+
+        const tx = await eventContract.setActive(false)
+        await tx.wait()
+        expect(await eventContract.active()).to.equal(false)
+        const encryptedMintingAmount = instance.encrypt32(eventData.ticketPrice)
+        const hexString = "0x" + toHexString(encryptedMintingAmount)
+        expect(
+            await eventContract.buyToken(deployer.address, hexString, {
+                gasLimit: 9000000,
+            })
+        ).to.be.revertedWith("Not Active");
+    });
+
+    it("Should let users buy tickets when Active inco-contract", async function () {
+        const { instance, erc20Contract, eventContract, deployer, tester } =
+            await deploymentFixture()
+        const encryptedMintingAmount = instance.encrypt32(eventData.ticketPrice)
+        const hexString = "0x" + toHexString(encryptedMintingAmount)
+        const tx1 = await erc20Contract.mintAndApprove(eventContract.address, hexString)
+        await tx1.wait()
+        const transaction = await eventContract.buyToken(deployer.address, hexString, {
+            gasLimit: 9000000,
+        })
+        await transaction.wait();
+        expect((await eventContract.getTokenIdCounter()).toNumber()).to.equal(1);
+        const tx2 = await erc20Contract.connect(tester).mintAndApprove(eventContract.address, hexString);
+        await tx2.wait();
+        const transaction2 = await eventContract.connect(tester).buyToken(deployer.address, hexString, {
+            gasLimit: 9000000,
+        })
+        await transaction2.wait()
+        expect((await eventContract.getTokenIdCounter()).toNumber()).to.equal(2)
+    })
+
+
 })

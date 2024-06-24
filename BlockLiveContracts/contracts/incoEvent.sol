@@ -100,7 +100,9 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
         address payerAddress = msg.sender;
         _onlyOneTokenPerAddress(receiver);
         _onlyBeforeEventEnds();
-        require(active, "Not active");
+        if(!active){
+            revert("Not Active");
+        }
 
         require(
             maxTokenSupply > tokenIdCounter + 1,
@@ -133,6 +135,7 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
         emit TokenPurchased(tokenId, receiver);
         _mint(receiver, tokenId, 1, "");
         userToTokenId[receiver] = tokenId;
+        tokenIdToUserAddress[tokenId] = receiver;
     }
 
     function spinLottery() external {
