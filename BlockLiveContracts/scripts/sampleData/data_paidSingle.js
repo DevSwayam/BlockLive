@@ -48,7 +48,7 @@ const priceData = {
     {
       tokenType: "vip",
       price: 4000000000,
-      currency: "native",
+      currency: "eusdc",
       currencyAddress: AddressZero,
     }
   ],

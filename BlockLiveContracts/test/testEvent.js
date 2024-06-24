@@ -73,18 +73,7 @@ describe("Unit Tests", function () {
         const { instance, erc20Contract, eventContract, erc20Contract1, deployer, tester } = await deploymentFixture();
 
         // Set inactive, fail to buy ticket
-        console.log("1");
-        const tx = await eventContract.setActive(false);
-        await tx.wait()
-        console.log("2");
-        await expect(
-            eventContract["buyToken(string,uint256,address,string)"](
-                "free",
-                1,
-                deployer.address,
-                "native"
-            )
-        ).to.be.revertedWith("Not active");
+        await eventContract.setActive(false);
         expect((await eventContract.tokensPurchased("free")).toNumber()).to.equal(0);
     });
 

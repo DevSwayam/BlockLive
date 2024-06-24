@@ -21,6 +21,7 @@ const createInstance = async () => {
         })
         const decoded = ethers.utils.defaultAbiCoder.decode(["bytes"], ret)
         publicKey = decoded[0]
+        //console.log(chainId);
     }
 
     const instance = await fhevmjs.createInstance({ chainId, publicKey })

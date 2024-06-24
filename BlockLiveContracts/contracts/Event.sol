@@ -6,7 +6,7 @@ import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import {ERC2981} from "@openzeppelin/contracts/token/common/ERC2981.sol";
 import {DefaultOperatorFilterer} from "operator-filter-registry/src/DefaultOperatorFilterer.sol";
-import {IEncryptedERC20} from "./IEncryptedERC20.sol";
+import {EncryptedERC20} from "./EncryptedERC20.sol";
 import "fhevm/lib/TFHE.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -153,7 +153,7 @@ contract Event is
 
     /// Mapping from currency name to its ERC20 address
     // @encrypted-erc20 change need to be added here IEncryptedErc20 will come
-    mapping(string => IEncryptedERC20) public tokenCurrencies;
+    mapping(string => EncryptedERC20) public tokenCurrencies;
 
     // All currency keys for iteration
     string[] private currencyKeys;
@@ -337,12 +337,6 @@ constructor(
             "Max supply for token type"
         );
 
-        require(
-            totalMaxSupply < 0 ||
-                tokenIdCounter + amount <= uint256(totalMaxSupply),
-            "Max supply for contract"
-        );
-
         require(amount < orderLimit, "Exceeds limit");
 
         require(
@@ -470,7 +464,7 @@ constructor(
             }
         }
 
-        uint256 tokenId = tokenIdCounter;
+        uint256 tokenId = tokenIdCounter; 
         tokenIdCounter += 1;
 
         _tokenTypeRegistry[_tokenType].purchased += 1;
@@ -514,10 +508,10 @@ constructor(
 
             if (
                 caddr != address(0) &&
-                tokenCurrencies[ckey] != IEncryptedERC20(caddr)
+                tokenCurrencies[ckey] != EncryptedERC20(caddr)
             ) {
                 // @encrypted-erc20 change
-                tokenCurrencies[ckey] = IEncryptedERC20(caddr);
+                tokenCurrencies[ckey] = EncryptedERC20(caddr);
                 currencyKeys.push(ckey);
                 emit currencyRegistered(caddr, currencyBase[i].price, currencyBase[i].currency,currencyBase[i].tokenType);
             }
@@ -648,7 +642,7 @@ constructor(
                 payable(splits[i].withdrawer).transfer(splitBalance);
             }
         } else {
-            IEncryptedERC20 token = tokenCurrencies[currency];
+            EncryptedERC20 token = tokenCurrencies[currency];
             euint32 _balance = token.returnEncryptedBalanceOfUser(
                 address(this)
             );

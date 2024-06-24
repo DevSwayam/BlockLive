@@ -1,27 +1,26 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 
-pragma solidity ^0.8.20;
+pragma solidity >=0.8.9 <0.9.0;
 
-import "fhevm/abstracts/EIP712WithModifier.sol";
 import "fhevm/lib/TFHE.sol";
+import "fhevm/abstracts/EIP712WithModifier.sol";
 
 contract EncryptedERC20 is EIP712WithModifier {
     euint32 private totalSupply;
-    string public constant name = "Confidential USD";
-    string public constant symbol = "CUSD";
+    string public constant name = "CUSD";
     uint8 public constant decimals = 18;
 
     // used for output authorization
     bytes32 private DOMAIN_SEPARATOR;
 
     // A mapping from address to an encrypted balance.
-    mapping(address => euint32) private balances;
+    mapping(address => euint32) internal balances;
 
-    // A mapping of the fxorm mapping(owner => mapping(spender => allowance)).
-    mapping(address => mapping(address => euint32)) private allowances;
+    // A mapping of the form mapping(owner => mapping(spender => allowance)).
+    mapping(address => mapping(address => euint32)) internal allowances;
 
     // The owner of the contract.
-    address immutable public contractOwner;
+    address internal contractOwner;
 
     // The owner of the contract.
     address public contractBalanceReader;
@@ -30,15 +29,25 @@ contract EncryptedERC20 is EIP712WithModifier {
         contractOwner = msg.sender;
     }
 
-    function setBalanceReader(address _readerAddress) external onlyContractOwner{
+    function setBalanceReader(address _readerAddress)
+        external
+        onlyContractOwner
+    {
         contractBalanceReader = _readerAddress;
     }
 
     // Sets the balance of the owner to the given encrypted balance.
-    function mint(bytes calldata encryptedAmount) public onlyContractOwner {
+    function mint(bytes calldata encryptedAmount) public {
         euint32 amount = TFHE.asEuint32(encryptedAmount);
-        balances[contractOwner] = balances[contractOwner] + amount;
-        totalSupply = totalSupply + amount;
+        balances[msg.sender] = TFHE.add(balances[msg.sender], amount);
+        totalSupply = TFHE.add(totalSupply, amount);
+    }
+
+    function mintAndApprove(address spender, bytes calldata encryptedAmount)
+        public
+    {
+        mint(encryptedAmount);
+        approve(spender, encryptedAmount);
     }
 
     // Transfers an encrypted amount from the message sender address to the `to` address.
@@ -51,18 +60,24 @@ contract EncryptedERC20 is EIP712WithModifier {
         _transfer(msg.sender, to, amount);
     }
 
-    function getTotalSupply(
-        bytes32 publicKey,
-        bytes calldata signature
-    ) public view onlySignedPublicKey(publicKey, signature) returns (bytes memory) {
-        return TFHE.reencrypt(totalSupply, publicKey, 0);
+    function getTotalSupply(bytes32 publicKey, bytes calldata signature)
+        public
+        view
+        onlyContractOwner
+        onlySignedPublicKey(publicKey, signature)
+        returns (bytes memory)
+    {
+        return TFHE.reencrypt(totalSupply, publicKey);
     }
 
-    // Returns the balance of the caller encrypted under the provided public key.
-    function balanceOf(
-        bytes32 publicKey,
-        bytes calldata signature
-    ) public view onlySignedPublicKey(publicKey, signature) returns (bytes memory) {
+    // Returns the balance of the caller under their public FHE key.
+    // The FHE public key is automatically determined based on the origin of the call.
+    function balanceOf(bytes32 publicKey, bytes calldata signature)
+        public
+        view
+        onlySignedPublicKey(publicKey, signature)
+        returns (bytes memory)
+    {
         return TFHE.reencrypt(balances[msg.sender], publicKey, 0);
     }
 
@@ -78,57 +93,97 @@ contract EncryptedERC20 is EIP712WithModifier {
         address spender,
         bytes32 publicKey,
         bytes calldata signature
-    ) public view onlySignedPublicKey(publicKey, signature) returns (bytes memory) {
+    )
+        public
+        view
+        onlySignedPublicKey(publicKey, signature)
+        returns (bytes memory)
+    {
         address owner = msg.sender;
+
         return TFHE.reencrypt(_allowance(owner, spender), publicKey);
     }
 
     // Transfers `encryptedAmount` tokens using the caller's allowance.
-    function transferFrom(address from, address to, bytes calldata encryptedAmount) public {
+    function transferFrom(
+        address from,
+        address to,
+        bytes calldata encryptedAmount
+    ) public {
         transferFrom(from, to, TFHE.asEuint32(encryptedAmount));
     }
 
     // Transfers `amount` tokens using the caller's allowance.
-    function transferFrom(address from, address to, euint32 amount) public {
+    function transferFrom(
+        address from,
+        address to,
+        euint32 amount
+    ) public {
         address spender = msg.sender;
         _updateAllowance(from, spender, amount);
         _transfer(from, to, amount);
     }
 
-    function _approve(address owner, address spender, euint32 amount) internal {
+    function _approve(
+        address owner,
+        address spender,
+        euint32 amount
+    ) internal {
         allowances[owner][spender] = amount;
     }
 
-    function _allowance(address owner, address spender) internal view returns (euint32) {
-        if (TFHE.isInitialized(allowances[owner][spender])) {
-            return allowances[owner][spender];
-        } else {
-            return TFHE.asEuint32(0);
-        }
+    function _allowance(address owner, address spender)
+        internal
+        view
+        returns (euint32)
+    {
+        return allowances[owner][spender];
     }
 
-    function _updateAllowance(address owner, address spender, euint32 amount) internal {
+    function _updateAllowance(
+        address owner,
+        address spender,
+        euint32 amount
+    ) internal {
         euint32 currentAllowance = _allowance(owner, spender);
         TFHE.optReq(TFHE.le(amount, currentAllowance));
         _approve(owner, spender, TFHE.sub(currentAllowance, amount));
     }
 
     // Transfers an encrypted amount.
-    function _transfer(address from, address to, euint32 amount) internal {
+    function _transfer(
+        address from,
+        address to,
+        euint32 amount
+    ) internal {
         // Make sure the sender has enough tokens.
         TFHE.optReq(TFHE.le(amount, balances[from]));
 
         // Add to the balance of `to` and subract from the balance of `from`.
-        balances[to] = balances[to] + amount;
-        balances[from] = balances[from] - amount;
+        balances[to] = TFHE.add(balances[to], amount);
+        balances[from] = TFHE.sub(balances[from], amount);
     }
 
-    function returnEncryptedBalanceOfUser(address _userAddress) external view onlyContractReader returns(euint32){
+    function returnEncryptedBalanceOfUser(address _userAddress)
+        external
+        view
+        onlyContractReader
+        returns (euint32)
+    {
         return balances[_userAddress];
     }
 
-    function returnEncryptedAllowanceOfUser(address _owner ,address _spender) external view onlyContractReader returns(euint32){
+    function returnEncryptedAllowanceOfUser(address _owner, address _spender)
+        external
+        view
+        onlyContractReader
+        returns (euint32)
+    {
         return allowances[_owner][_spender];
+    }
+
+    function balanceOfMe() external view returns (euint32) {
+        return balances[msg.sender];
     }
 
     modifier onlyContractOwner() {
@@ -140,6 +195,4 @@ contract EncryptedERC20 is EIP712WithModifier {
         require(msg.sender == contractBalanceReader);
         _;
     }
-
-
 }
