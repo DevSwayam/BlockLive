@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
-import {IEncryptedERC20} from "./IEncryptedERC20.sol";
+import {EncryptedERC20} from "./EncryptedERC20.sol";
 import "fhevm/lib/TFHE.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
@@ -16,7 +16,7 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
      * 1. Offchain signing the transaction
      * 2. Discount on tokens
      * 3. Royalty for organisers
-     * 4. Revenue disctribution for managers
+     * 4. Revenue distribution for managers
      * 5. Cannot provide different options of currencies
      */
 
@@ -28,16 +28,14 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
     string public location;
     uint256 public eventStartTime;
     uint256 public eventEndTime;
-    string public eventHost;
-    string public eventThumbnail;
     uint32 public ticketPrice;
-    address public tokenAddress;
     euint8 private encryptedRandomNumber;
     uint256 public maxTokenSupply;
     bool public active;
     uint256 public tokenIdCounter;
     address public scratchCardWinnerAddress;
     address public lotteryWinnerAddress;
+    mapping(string => EncryptedERC20) public tokenCurrencies;
 
     mapping(address => uint256) public userToTokenId;
     mapping(uint256 => address) public tokenIdToUserAddress;
@@ -45,10 +43,30 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
     event TokenPurchased(uint256 indexed tokenId, address indexed receiver);
     event ScratchCardWinner(address indexed userAddress, uint256 tokenId);
     event LotteryWinner(address indexed userAddress, uint256 tokenId);
+
     // @dev Used to sync user address with role
     struct RoleBase {
         address userAddress;
         bytes32 role;
+    }
+
+    struct TokenTypeBase {
+        string key;
+    }
+
+    /// @dev Each type of currency accepted for token purchases
+    struct CurrencyBase {
+        uint32 price; // Price for the token type
+        string currency; // Unique key for the erc20 token used for purchase
+        address currencyAddress; // Contract address for the erc20 token used for purchase
+    }
+
+    struct Split {
+        bool exists;
+    }
+
+    struct DiscountBase {
+        string key;
     }
 
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
@@ -63,14 +81,11 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
         address _creator,
         string memory _uribase,
         string memory _nameContract,
+        CurrencyBase memory currencyBase,
         string memory _eventDescription,
         string memory _location,
         uint256 _eventStartTime,
         uint256 _eventEndTime,
-        string memory _eventHost,
-        string memory _eventThumbnail,
-        uint32 _ticketPrice,
-        address _tokenAddress,
         uint256 _maxTokenSupply
     ) ERC1155(_uribase) {
         creator = _creator;
@@ -80,10 +95,6 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
         location = _location;
         eventStartTime = _eventStartTime;
         eventEndTime = _eventEndTime;
-        eventHost = _eventHost;
-        eventThumbnail = _eventThumbnail;
-        ticketPrice = _ticketPrice;
-        tokenAddress = _tokenAddress;
         maxTokenSupply = _maxTokenSupply;
         active = true;
 
@@ -92,15 +103,45 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
 
         _grantRole(OWNER_ROLE, creator);
         _grantRole(MANAGER_ROLE, creator);
+
+        syncEventData(currencyBase);
     }
 
-    function buyToken(address receiver, bytes calldata bytesEncryptedAmount)
-        public
-    {
+    /// @notice Sync all event data
+    /// @notice (token types, pricing, discounts)
+    /// @dev each will be noop if empty array is passed
+    function syncEventData(
+        CurrencyBase memory currencyBase
+    ) public {
+        _onlyManagerOrOwner();
+        registerCurrency(currencyBase);
+    }
+
+    function registerCurrency(CurrencyBase memory currencyBase) public {
+        _onlyManagerOrOwner();
+        string memory ckey = currencyBase.currency;
+        address caddr = currencyBase.currencyAddress;
+        tokenCurrencies[ckey] = EncryptedERC20(caddr);
+        ticketPrice = currencyBase.price;
+    }
+
+    /// @notice Register roles
+    function registerRoles(RoleBase[] memory roles) public {
+        _onlyManagerOrOwner();
+        for (uint256 i = 0; i < roles.length; i++) {
+            _grantRole(roles[i].role, roles[i].userAddress);
+        }
+    }
+
+    function buyToken(
+        address receiver,
+        string memory currency,
+        bytes memory bytesEncryptedAmount
+    ) public {
         address payerAddress = msg.sender;
         _onlyOneTokenPerAddress(receiver);
         _onlyBeforeEventEnds();
-        if(!active){
+        if (!active) {
             revert("Not Active");
         }
 
@@ -114,12 +155,8 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
         // requiredTokenAmountToBePaid = then convert the price.value * amount into euint
         euint32 _ticketPrice = TFHE.asEuint32(ticketPrice);
         TFHE.optReq(TFHE.le(_ticketPrice, _userBalance));
-
-        IEncryptedERC20(tokenAddress).transferFrom(
-            payerAddress,
-            address(this),
-            bytesEncryptedAmount
-        );
+        EncryptedERC20 token = tokenCurrencies[currency];
+        token.transferFrom(payerAddress, address(this), bytesEncryptedAmount);
 
         uint256 tokenId = tokenIdCounter;
         tokenIdCounter += 1;
@@ -242,9 +279,11 @@ contract incoEvent is ERC1155, ERC2981, AccessControlEnumerable {
         }
     }
 
-    function takeOutRevenue(address revenueReceiver) external {
+    function takeOutRevenue(address revenueReceiver, string memory ckey)
+        external
+    {
         _onlyManagerOrOwner();
-        IEncryptedERC20 token = IEncryptedERC20(tokenAddress);
+        EncryptedERC20 token = tokenCurrencies[ckey];
         euint32 balanceOfContract = token.balanceOfMe();
         token.transfer(revenueReceiver, balanceOfContract);
     }

@@ -2,7 +2,7 @@ const { ethers } = require("hardhat")
 const { assert, expect } = require("chai")
 const { createInstance } = require("../scripts/helpers/createInstance")
 const { toHexString } = require("../scripts/helpers/utils")
-const { eventData } = require("../scripts/sampleData/data_incoEvent")
+const { eventData, priceData } = require("../scripts/sampleData/data_incoEvent")
 
 describe("Unit Tests", function () {
     // We define a fixture to reuse the same setup in every test.
@@ -15,22 +15,21 @@ describe("Unit Tests", function () {
 
         // Deploying and Setting up the event Contract
         const eventFactory = await ethers.getContractFactory("incoEvent")
-        const eventContract = await eventFactory
-            .connect(deployer)
-            .deploy(
-                deployer.address,
-                eventData.uri,
-                eventData.name,
-                eventData.description,
-                eventData.location,
-                eventData.start,
-                eventData.end,
-                eventData.host,
-                eventData.thumbnail,
-                eventData.ticketPrice,
-                erc20Contract.address,
-                eventData.maxTokenSupply
-            )
+        const eventContract = await eventFactory.connect(deployer).deploy(
+            deployer.address,
+            eventData.uri,
+            eventData.name,
+            {
+                price: 400000000,
+                currency: "usdc",
+                currencyAddress: erc20Contract.address,
+            },
+            eventData.description,
+            eventData.location,
+            eventData.start,
+            eventData.end,
+            eventData.maxTokenSupply
+        )
 
         console.log("Event Contract Address is : ", eventContract.address)
 
@@ -46,25 +45,15 @@ describe("Unit Tests", function () {
         await erc20Contract.mintAndApprove(eventContract.address, hexString)
     })
 
-    it("Should not allow us to buy when not active", async function () {
-        const { instance, erc20Contract, eventContract, deployer, tester } =
-            await deploymentFixture()
 
-        // Set inactive, fail to buy ticket
-        await eventContract.setActive(false)
-        await expect(eventContract["buyToken(address)"](owner.address)).to.be.revertedWith(
-            "Not active"
-        )
-    })
-
-    it("Should let us buy tickets when Active inco-contract", async function () {
+    it("Should let us buy ticket when Active inco-contract", async function () {
         const { instance, erc20Contract, eventContract, deployer, tester } =
             await deploymentFixture()
         const encryptedMintingAmount = instance.encrypt32(eventData.ticketPrice)
         const hexString = "0x" + toHexString(encryptedMintingAmount)
         const tx1 = await erc20Contract.mintAndApprove(eventContract.address, hexString)
         await tx1.wait()
-        const transaction = await eventContract.buyToken(deployer.address, hexString, {
+        const transaction = await eventContract.buyToken(deployer.address, "usdc", hexString, {
             gasLimit: 9000000,
         })
         await transaction.wait()
@@ -91,11 +80,11 @@ describe("Unit Tests", function () {
         const encryptedMintingAmount = instance.encrypt32(eventData.ticketPrice)
         const hexString = "0x" + toHexString(encryptedMintingAmount)
         expect(
-            await eventContract.buyToken(deployer.address, hexString, {
+            await eventContract.buyToken(deployer.address, "usdc", hexString, {
                 gasLimit: 9000000,
             })
-        ).to.be.revertedWith("Not Active");
-    });
+        ).to.be.revertedWith("Not Active")
+    })
 
     it("Should let users buy tickets when Active inco-contract", async function () {
         const { instance, erc20Contract, eventContract, deployer, tester } =
@@ -104,19 +93,21 @@ describe("Unit Tests", function () {
         const hexString = "0x" + toHexString(encryptedMintingAmount)
         const tx1 = await erc20Contract.mintAndApprove(eventContract.address, hexString)
         await tx1.wait()
-        const transaction = await eventContract.buyToken(deployer.address, hexString, {
+        const transaction = await eventContract.buyToken(deployer.address, "usdc", hexString, {
             gasLimit: 9000000,
         })
-        await transaction.wait();
-        expect((await eventContract.getTokenIdCounter()).toNumber()).to.equal(1);
-        const tx2 = await erc20Contract.connect(tester).mintAndApprove(eventContract.address, hexString);
-        await tx2.wait();
-        const transaction2 = await eventContract.connect(tester).buyToken(deployer.address, hexString, {
-            gasLimit: 9000000,
-        })
+        await transaction.wait()
+        expect((await eventContract.getTokenIdCounter()).toNumber()).to.equal(1)
+        const tx2 = await erc20Contract
+            .connect(tester)
+            .mintAndApprove(eventContract.address, hexString)
+        await tx2.wait()
+        const transaction2 = await eventContract
+            .connect(tester)
+            .buyToken(deployer.address, "usdc", hexString, {
+                gasLimit: 9000000,
+            })
         await transaction2.wait()
         expect((await eventContract.getTokenIdCounter()).toNumber()).to.equal(2)
     })
-
-
 })
