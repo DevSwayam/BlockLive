@@ -32,6 +32,7 @@ describe("Unit Tests", function () {
         )
 
         console.log("Event Contract Address is : ", eventContract.address)
+        console.log("Encrypted ERC20 Contract Address is : ", erc20Contract.address)
 
         return { instance, erc20Contract, eventContract, deployer, tester }
     }
