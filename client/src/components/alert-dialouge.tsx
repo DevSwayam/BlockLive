@@ -24,7 +24,7 @@ const AlertDialouge: React.FC<AlertDialogProps> = ({
   setIsOpen,
 }) => {
   const { toast } = useToast();
-  const copyAddress = (e) => {
+  const copyAddress = (e: any) => {
     e.preventDefault();
     try {
       navigator.clipboard.writeText(

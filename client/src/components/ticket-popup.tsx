@@ -52,7 +52,17 @@ const TicketPopup: React.FC<AlertDialogProps> = ({
 
 export default TicketPopup;
 
-const TicketCard = ({
+interface TicketCardProps {
+  creator: string;
+  nameContract: string;
+  eventDescription: string;
+  location: string;
+  eventStartTime: any;
+  eventEndTime: any;
+  ticketPrice: number;
+}
+
+const TicketCard: React.FC<TicketCardProps> = ({
   creator,
   nameContract,
   eventDescription,

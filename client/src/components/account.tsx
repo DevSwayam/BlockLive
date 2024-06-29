@@ -79,11 +79,11 @@ export function Account() {
 
   const getContractAddressFunction = async (setter: any, alerDialouge: any) => {
     const transactionCount = await getTransactionCount(config, {
-      address: address,
+      address: `0x${address?.slice(2)}`,
     });
     const contractAddress = await getContractAddress({
-      from: address,
-      nonce: transactionCount,
+      from: `0x${address?.slice(2)}`,
+      nonce: transactionCount as unknown as bigint,
     });
     setter(contractAddress);
     alerDialouge(true);
@@ -111,7 +111,7 @@ export function Account() {
     deployContract(
       {
         abi: eventABI,
-        args: data,
+        args: data as any,
         bytecode: byteCode,
       },
       {
@@ -224,12 +224,16 @@ export function Account() {
           </div>
         )}
       </div>
-      <h2 className="text-2xl font-semibold">Step 1: Deploy your ERC20 contract</h2>
+      <h2 className="text-2xl font-semibold">
+        Step 1: Deploy your ERC20 contract
+      </h2>
       <div>
         <Button onClick={deployERC20Contract}>Deploy Erc 20 contract</Button>
       </div>
       <div className="mt-10 flex justify-between scroll-m-20 border-b pb-6 text-3xl font-semibold tracking-tight transition-colors first:mt-0"></div>
-      <h2 className="text-2xl font-semibold">Step 2: Deploy your event contract</h2>
+      <h2 className="text-2xl font-semibold">
+        Step 2: Deploy your event contract
+      </h2>
       <div className="grid grid-cols-2 mt-6 gap-8">
         {formFields.map(({ id, label }) => (
           <div key={id} className="grid gap-2 md:grid-cols-2 items-center">
@@ -237,7 +241,7 @@ export function Account() {
             <Input
               id={id}
               onChange={handleChange}
-              value={formValues[id]}
+              value={formValues[id as keyof typeof formValues]}
               placeholder={label}
             />
           </div>

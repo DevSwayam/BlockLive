@@ -58,16 +58,19 @@ const Page = () => {
     try {
       const instance = await getInstance();
       const encryptedString = await instance.encrypt32(400000000);
-      const hexString = "0x" + toHexString(encryptedString);
+      const hexString = toHexString(encryptedString);
       const result = await writeContract(config, {
         abi: erc20ABI,
-        address: formValues.erc20ContractAddress,
+        address: `0x${formValues.erc20ContractAddress.slice(2)}`,
         functionName: "mintAndApprove",
-        args: [formValues.eventContractAddress, hexString],
+        args: [
+          `0x${formValues.eventContractAddress.slice(2)}`,
+          `0x${hexString}`,
+        ],
       });
       console.log(formValues.eventContractAddress);
       console.log(result);
-    } catch (error) {
+    } catch (error: any) {
       let errorMessage;
       let indexOfDot = error.message.indexOf(".");
       if (indexOfDot !== -1) {
@@ -82,7 +85,7 @@ const Page = () => {
   };
 
   const watchContract = watchContractEvent(config, {
-    address: formValues.eventContractAddress,
+    address: `0x${formValues.eventContractAddress.slice(2)}`,
     abi: eventABI,
     eventName: "TokenPurchased",
     onLogs(logs) {
@@ -95,13 +98,13 @@ const Page = () => {
     try {
       const instance = await getInstance();
       const encryptedString = await instance.encrypt32(400000000);
-      const hexString = "0x" + toHexString(encryptedString);
+      const hexString = toHexString(encryptedString);
       // console.log(hexString);
       const result = await writeContract(config, {
         abi: eventABI,
-        address: formValues.eventContractAddress,
+        address: `0x${formValues.eventContractAddress.slice(2)}`,
         functionName: "buyToken",
-        args: [address, "usdc", hexString],
+        args: [`0x${address?.slice(2)}`, "usdc", `0x${hexString}`],
       });
       console.log([
         formValues.eventContractAddress,
@@ -113,7 +116,7 @@ const Page = () => {
         console.log(result);
         watchContract();
       }
-    } catch (error) {
+    } catch (error: any) {
       let errorMessage;
       let indexOfDot = error.message.indexOf(".");
       if (indexOfDot !== -1) {
@@ -150,7 +153,7 @@ const Page = () => {
                 token. This token will be used to access various features and
                 benefits exclusive to token holders. Ensure you have a
                 compatible wallet to store your tokens securely. Once you have
-                the token, you'll be ready for the next step.
+                the token, you&apos;ll be ready for the next step.
               </p>
               <div className="w-full grid place-items-end">
                 <Button onClick={getERC20Tokens}>Get ERC Token</Button>
@@ -187,7 +190,7 @@ const Page = () => {
                 <Input
                   id={id}
                   onChange={handleChange}
-                  value={formValues[id]}
+                  value={formValues[id as keyof typeof formValues]}
                   placeholder={label}
                 />
               </div>
